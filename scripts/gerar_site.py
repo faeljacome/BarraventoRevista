@@ -1210,9 +1210,11 @@ def render_featured_carousel(articles: list[Article]) -> str:
         )
 
     return f"""          <section class="feature-carousel" data-feature-carousel>
+            <button class="feature-carousel__arrow feature-carousel__arrow--prev" type="button" data-feature-prev aria-label="Mostrar texto anterior">&#8249;</button>
             <div class="feature-carousel__track">
 {chr(10).join(slides)}
             </div>
+            <button class="feature-carousel__arrow feature-carousel__arrow--next" type="button" data-feature-next aria-label="Mostrar proximo texto">&#8250;</button>
             <div class="feature-carousel__controls" aria-label="Ultimos textos publicados">
 {chr(10).join(dots)}
             </div>
@@ -1505,42 +1507,37 @@ def render_home_page(articles: list[Article]) -> str:
     home_script = """
       <script>
         (() => {
-          if (!window.BarraventoConsent || !window.BarraventoConsent.hasPerformanceConsent()) {
-            return;
-          }
           const storageKey = "barravento-read-counts";
           const list = document.querySelector("[data-most-read-list]");
-          if (!list) {
-            return;
-          }
-
           let counts = {};
-          try {
-            counts = JSON.parse(localStorage.getItem(storageKey) || "{}");
-          } catch (error) {
-            counts = {};
+          if (list && window.BarraventoConsent && window.BarraventoConsent.hasPerformanceConsent()) {
+            try {
+              counts = JSON.parse(localStorage.getItem(storageKey) || "{}");
+            } catch (error) {
+              counts = {};
+            }
+
+            const pluralize = (value) => value === 1 ? "1 leitura" : value + " leituras";
+            const items = Array.from(list.querySelectorAll("[data-most-read-item]")).map((item, index) => ({ item, index }));
+            items.sort((left, right) => {
+              const leftCount = Number(counts[left.item.dataset.slug] || 0);
+              const rightCount = Number(counts[right.item.dataset.slug] || 0);
+              if (leftCount !== rightCount) {
+                return rightCount - leftCount;
+              }
+              return left.index - right.index;
+            });
+
+            const target = list.querySelector(".most-read__list");
+            items.forEach(({ item }) => {
+              const count = Number(counts[item.dataset.slug] || 0);
+              const countNode = item.querySelector("[data-most-read-count]");
+              if (countNode) {
+                countNode.textContent = pluralize(count);
+              }
+              target.appendChild(item);
+            });
           }
-
-          const pluralize = (value) => value === 1 ? "1 leitura" : value + " leituras";
-          const items = Array.from(list.querySelectorAll("[data-most-read-item]")).map((item, index) => ({ item, index }));
-          items.sort((left, right) => {
-            const leftCount = Number(counts[left.item.dataset.slug] || 0);
-            const rightCount = Number(counts[right.item.dataset.slug] || 0);
-            if (leftCount !== rightCount) {
-              return rightCount - leftCount;
-            }
-            return left.index - right.index;
-          });
-
-          const target = list.querySelector(".most-read__list");
-          items.forEach(({ item }) => {
-            const count = Number(counts[item.dataset.slug] || 0);
-            const countNode = item.querySelector("[data-most-read-count]");
-            if (countNode) {
-              countNode.textContent = pluralize(count);
-            }
-            target.appendChild(item);
-          });
 
           const carousel = document.querySelector("[data-feature-carousel]");
           if (!carousel) {
@@ -1549,6 +1546,8 @@ def render_home_page(articles: list[Article]) -> str:
 
           const slides = Array.from(carousel.querySelectorAll("[data-feature-slide]"));
           const dots = Array.from(carousel.querySelectorAll("[data-feature-dot]"));
+          const previousButton = carousel.querySelector("[data-feature-prev]");
+          const nextButton = carousel.querySelector("[data-feature-next]");
           if (slides.length < 2) {
             return;
           }
@@ -1581,6 +1580,20 @@ def render_home_page(articles: list[Article]) -> str:
               restart();
             });
           });
+
+          if (previousButton) {
+            previousButton.addEventListener("click", () => {
+              applySlide((currentIndex - 1 + slides.length) % slides.length);
+              restart();
+            });
+          }
+
+          if (nextButton) {
+            nextButton.addEventListener("click", () => {
+              applySlide((currentIndex + 1) % slides.length);
+              restart();
+            });
+          }
 
           carousel.addEventListener("mouseenter", () => {
             if (timer) {
