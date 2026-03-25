@@ -5,6 +5,7 @@
   "description": "Servidor Node unico para a Revista Barravento.",
   "main": "server.js",
   "scripts": {
+    "postinstall": "node scripts/install-python-deps.js",
     "start": "node server.js"
   },
   "engines": {

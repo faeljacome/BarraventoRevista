@@ -296,10 +296,29 @@ function arrayValue(raw) {
   return [String(raw).trim()].filter(Boolean);
 }
 
+function repairMojibakeText(value) {
+  const text = String(value || "").trim();
+  if (!text || !/[ÃÂ]/.test(text)) {
+    return text;
+  }
+  try {
+    return Buffer.from(text, "latin1").toString("utf8").trim();
+  } catch {
+    return text;
+  }
+}
+
 function parseCategories(raw) {
   const lookup = new Map(CATEGORY_CANONICAL.map((item) => [slugify(item), item]));
   const categories = arrayValue(raw)
-    .map((item) => lookup.get(slugify(item)) || "")
+    .map((item) => {
+      const direct = lookup.get(slugify(item));
+      if (direct) {
+        return direct;
+      }
+      const repaired = repairMojibakeText(item);
+      return lookup.get(slugify(repaired)) || "";
+    })
     .filter(Boolean)
     .filter((item, index, list) => list.indexOf(item) === index);
   if (!categories.length) {
@@ -910,7 +929,7 @@ function runBuildScript() {
   }
   throw createError(
     500,
-    `O servidor Node nao conseguiu atualizar o site. Verifique se o Python esta instalado neste ambiente. ${lastError ? String(lastError.message || lastError) : ""}`.trim()
+    `O servidor Node nao conseguiu atualizar o site. Verifique se o Python e as dependencias de requirements.txt estao instalados neste ambiente. ${lastError ? String(lastError.message || lastError) : ""}`.trim()
   );
 }
 
