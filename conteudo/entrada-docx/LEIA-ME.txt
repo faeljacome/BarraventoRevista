@@ -1,0 +1,15 @@
+Coloque aqui os arquivos .docx que devem virar novas paginas do site.
+
+Opcoes:
+- Entre por membros/ para fazer login e, depois, use o painel em painel/ para publicar ou editar.
+- No painel web, o envio exige .docx + imagem + pelo menos uma categoria e aceita tags e hashtags.
+- No mesmo painel, voce pode editar um texto existente e substituir o documento e/ou a imagem.
+- Rode atualizar-site.bat para processar os arquivos manualmente.
+- Ou deixe iniciar-importador.bat aberto para processar automaticamente.
+
+Depois de processado:
+- o .docx vai para conteudo/processados
+- a imagem enviada pelo painel vai para site/uploads
+- a pagina vai para site/artigos/<slug>/index.html
+- cada categoria ganha sua propria pagina em site/categorias/<slug>/index.html
+- a home do site sera atualizada com os 3 textos mais recentes por categoria

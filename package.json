@@ -1,0 +1,22 @@
+{
+  "name": "site-barravento",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Servidor Node unico para a Revista Barravento.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@ckeditor/ckeditor5-build-decoupled-document": "^41.4.2",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "mammoth": "^1.12.0",
+    "multer": "^2.0.2",
+    "quill": "^2.0.3",
+    "tinymce": "^8.3.2"
+  }
+}

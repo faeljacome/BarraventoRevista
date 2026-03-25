@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /painel/
+Disallow: /membros/
+Disallow: /publicar.html
