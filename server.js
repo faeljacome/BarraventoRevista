@@ -1604,9 +1604,12 @@ app.post("/api/members/login", (req, res, next) => {
       throw createError(403, "Cadastro aguardando aprovacao do Conselho Editorial.");
     }
     const token = createSession(email);
+    const secureCookie = req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
     res.cookie(SESSION_COOKIE_NAME, token, {
       httpOnly: true,
       sameSite: "lax",
+      secure: secureCookie,
+      path: "/",
       maxAge: SESSION_MAX_AGE
     });
     res.json({
@@ -1624,7 +1627,13 @@ app.post("/api/members/logout", (req, res) => {
   if (token) {
     sessions.delete(token);
   }
-  res.clearCookie(SESSION_COOKIE_NAME);
+  const secureCookie = req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+  res.clearCookie(SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: secureCookie,
+    path: "/"
+  });
   res.json({
     ok: true,
     authenticated: false,

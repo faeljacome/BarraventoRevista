@@ -33,6 +33,7 @@ CONTACT_DIR = SITE_DIR / "contato"
 SEARCH_DIR = SITE_DIR / "busca"
 MEMBERS_DIR = SITE_DIR / "membros"
 PANEL_DIR = SITE_DIR / "painel"
+COOKIE_POLICY_DIR = SITE_DIR / "politica-de-cookies"
 PDF_DIR = SITE_DIR / "pdfs"
 INPUT_DIR = ROOT / "conteudo" / "entrada-docx"
 PROCESSED_DIR = ROOT / "conteudo" / "processados"
@@ -778,9 +779,17 @@ def page_links(root_prefix: str) -> dict[str, str]:
         "search": f"{root_prefix}busca/",
         "who": f"{root_prefix}quem-somos/",
         "contact": f"{root_prefix}contato/",
+        "cookies": f"{root_prefix}politica-de-cookies/",
         "logo": site_logo_href(root_prefix),
         "symbol": site_symbol_href(root_prefix),
     }
+
+
+def root_prefix_from_page_path(page_path: str) -> str:
+    parts = [part for part in str(page_path or "").split("/") if part]
+    if parts and parts[-1].lower().endswith(".html"):
+        parts = parts[:-1]
+    return "../" * len(parts)
 
 
 def render_member_nav_script() -> str:
@@ -836,6 +845,161 @@ def render_member_nav_script() -> str:
 """
 
 
+def render_cookie_consent_markup(root_prefix: str) -> str:
+    links = page_links(root_prefix)
+    policy_link = links["cookies"]
+    support_link = links["contact"]
+    return f"""
+  <a class="support-button" href="{support_link}">Apoia-se</a>
+  <section class="cookie-banner" data-cookie-banner hidden aria-live="polite">
+    <div class="cookie-banner__inner">
+      <div class="cookie-banner__copy">
+        <strong>Cookies e tecnologias semelhantes</strong>
+        <p>Usamos um cookie necessario para a area de membros e recurso opcional de desempenho para leituras e mais lidos. Os opcionais ficam desligados por padrao.</p>
+        <a href="{policy_link}">Ler a Politica de Cookies</a>
+      </div>
+      <div class="cookie-banner__actions">
+        <button class="button-link button-link--ghost" type="button" data-cookie-reject>Rejeitar opcionais</button>
+        <button class="button-link" type="button" data-cookie-accept>Aceitar opcionais</button>
+      </div>
+    </div>
+  </section>
+"""
+
+
+def render_footer(root_prefix: str) -> str:
+    links = page_links(root_prefix)
+    return f"""
+    <footer class="site-footer">
+      <div class="container site-footer__inner">
+        <p class="site-footer__copy">Revista Barravento.</p>
+        <nav class="site-footer__nav" aria-label="Rodape">
+          <a href="{links['who']}">Quem Somos</a>
+          <a href="{links['contact']}">Contato</a>
+          <a href="{links['cookies']}">Politica de Cookies</a>
+        </nav>
+      </div>
+    </footer>
+"""
+
+
+def render_cookie_consent_script(root_prefix: str) -> str:
+    policy_link = json.dumps(page_links(root_prefix)["cookies"])
+    return f"""  <script>
+    (() => {{
+      const consentKey = "barravento-cookie-preferences";
+      const performanceKeys = ["barravento-read-counts"];
+      const performancePrefixes = ["barravento-read-stamp:"];
+      const policyLink = {policy_link};
+      const banner = document.querySelector("[data-cookie-banner]");
+      const openButton = document.querySelector("[data-cookie-open]");
+
+      function defaults() {{
+        return {{
+          necessary: true,
+          performance: false,
+          decided: false,
+          updated_at: ""
+        }};
+      }}
+
+      function readPreferences() {{
+        try {{
+          const stored = JSON.parse(localStorage.getItem(consentKey) || "null");
+          if (!stored || typeof stored !== "object") {{
+            return defaults();
+          }}
+          return {{
+            necessary: true,
+            performance: Boolean(stored.performance),
+            decided: Boolean(stored.decided),
+            updated_at: String(stored.updated_at || "")
+          }};
+        }} catch (error) {{
+          return defaults();
+        }}
+      }}
+
+      function clearPerformanceStorage() {{
+        try {{
+          performanceKeys.forEach((key) => localStorage.removeItem(key));
+          const keysToRemove = [];
+          for (let index = 0; index < localStorage.length; index += 1) {{
+            const key = localStorage.key(index) || "";
+            if (performancePrefixes.some((prefix) => key.startsWith(prefix))) {{
+              keysToRemove.push(key);
+            }}
+          }}
+          keysToRemove.forEach((key) => localStorage.removeItem(key));
+        }} catch (error) {{
+          return;
+        }}
+      }}
+
+      function storePreferences(next) {{
+        const payload = {{
+          necessary: true,
+          performance: Boolean(next && next.performance),
+          decided: true,
+          updated_at: new Date().toISOString()
+        }};
+        try {{
+          localStorage.setItem(consentKey, JSON.stringify(payload));
+        }} catch (error) {{
+          return payload;
+        }}
+        if (!payload.performance) {{
+          clearPerformanceStorage();
+        }}
+        return payload;
+      }}
+
+      function applyPreferences(prefs) {{
+        if (banner) {{
+          banner.hidden = Boolean(prefs.decided);
+        }}
+        document.body.dataset.cookieDecision = prefs.decided ? "set" : "pending";
+        document.body.dataset.cookiePerformance = prefs.performance ? "granted" : "denied";
+      }}
+
+      function emitPreferences(prefs) {{
+        window.dispatchEvent(new CustomEvent("barravento:consent-changed", {{ detail: prefs }}));
+      }}
+
+      window.BarraventoConsent = {{
+        getPreferences: readPreferences,
+        hasPerformanceConsent() {{
+          return Boolean(readPreferences().performance);
+        }}
+      }};
+
+      const initial = readPreferences();
+      applyPreferences(initial);
+
+      const acceptButton = document.querySelector("[data-cookie-accept]");
+      const rejectButton = document.querySelector("[data-cookie-reject]");
+
+      if (acceptButton) {{
+        acceptButton.addEventListener("click", () => {{
+          const prefs = storePreferences({{ performance: true }});
+          applyPreferences(prefs);
+          emitPreferences(prefs);
+        }});
+      }}
+
+      if (rejectButton) {{
+        rejectButton.addEventListener("click", () => {{
+          const prefs = storePreferences({{ performance: false }});
+          applyPreferences(prefs);
+          emitPreferences(prefs);
+        }});
+      }}
+
+    }})();
+  </script>
+"""
+
+
 def render_shell(
     *,
     page_title: str,
@@ -853,6 +1017,7 @@ def render_shell(
 ) -> str:
     canonical_url = absolute_site_url(page_path)
     social_image_url = absolute_site_url(page_path_from_root("", image_path))
+    root_prefix = root_prefix_from_page_path(page_path)
     keywords_content = ", ".join(
         item for item in ([SITE_NAME, "revista", "marxismo", "crítica", "artigos"] + (keywords or [])) if item
     )
@@ -887,8 +1052,11 @@ def render_shell(
 {json_ld}
 </head>
 <body class="{body_class}">
+{render_cookie_consent_markup(root_prefix)}
+{render_cookie_consent_script(root_prefix)}
   <div class="page">
 {content}
+{render_footer(root_prefix)}
   </div>
 {render_member_nav_script()}
 </body>
@@ -936,9 +1104,7 @@ def render_header(root_prefix: str, *, date_label: str) -> str:
     <header class="masthead">
       <div class="container masthead__top">
         <a class="masthead__brand" href="{links['home']}">
-          <div class="masthead__wordmark">
-            <h1 class="masthead__title">BARRAVENTO</h1>
-          </div>
+          <img class="masthead__symbol" src="{site_symbol_href(root_prefix)}" alt="Farol da Revista Barravento">
         </a>
 {render_search_form(root_prefix)}
       </div>
@@ -1339,6 +1505,9 @@ def render_home_page(articles: list[Article]) -> str:
     home_script = """
       <script>
         (() => {
+          if (!window.BarraventoConsent || !window.BarraventoConsent.hasPerformanceConsent()) {
+            return;
+          }
           const storageKey = "barravento-read-counts";
           const list = document.querySelector("[data-most-read-list]");
           if (!list) {
@@ -3871,12 +4040,35 @@ def render_search_page(articles: list[Article]) -> str:
     )
 
 
+def render_cookie_policy_page() -> str:
+    blocks = [
+        "Esta Politica de Cookies explica como a Revista Barravento usa cookies e tecnologias semelhantes em conformidade com a Lei Geral de Protecao de Dados Pessoais (LGPD) e com as orientacoes da ANPD.",
+        "Usamos um cookie estritamente necessario chamado barravento_member_session para autenticar membros, proteger a area restrita e manter a sessao ativa apos o login. Esse cookie e HTTPOnly, possui SameSite=Lax, usa o caminho raiz do site e permanece ativo por ate sete dias ou ate o encerramento da sessao.",
+        "Tambem usamos armazenamento local do navegador para registrar, apenas com seu consentimento, leituras de textos e organizar a secao de mais lidos. Essas chaves locais sao barravento-read-counts e barravento-read-stamp:<slug>. Elas sao opcionais, ficam desativadas por padrao e podem ser apagadas quando voce rejeita os cookies de desempenho.",
+        "Guardamos sua escolha na chave local barravento-cookie-preferences para lembrar se voce aceitou ou recusou os recursos opcionais. Esse registro e necessario para preservar sua preferencia e evitar a reapresentacao constante do banner.",
+        "Voce pode aceitar, rejeitar ou personalizar os itens opcionais no banner inicial e revisar essa decisao a qualquer momento no botao Cookies disponivel no site.",
+        "Atualmente nao utilizamos cookies opcionais de publicidade comportamental nem cookies opcionais de terceiros para rastreamento comercial. Se isso mudar, esta politica e o banner serao atualizados antes da ativacao desses recursos.",
+        "Para exercer direitos previstos na LGPD ou tirar duvidas sobre privacidade e cookies, utilize os canais apresentados na pagina de Contato da revista.",
+    ]
+    return render_static_page(
+        title="Politica de Cookies",
+        eyebrow="Privacidade",
+        summary="Informacoes claras sobre cookies, tecnologias semelhantes, finalidades e como revisar suas preferencias.",
+        blocks=blocks,
+        root_prefix="../",
+        body_class="static-page",
+    )
+
+
 def render_article_page(article: Article) -> str:
     published = format_long_date(article.published_at)
     body_html = render_article_body(article)
     read_tracking_script = f"""
       <script>
         (() => {{
+          if (!window.BarraventoConsent || !window.BarraventoConsent.hasPerformanceConsent()) {{
+            return;
+          }}
           const storageKey = "barravento-read-counts";
           const stampKey = "barravento-read-stamp:{escape(article.slug)}";
           const slug = "{escape(article.slug)}";
@@ -4085,6 +4277,7 @@ def build_site() -> list[Article]:
     SEARCH_DIR.mkdir(parents=True, exist_ok=True)
     MEMBERS_DIR.mkdir(parents=True, exist_ok=True)
     PANEL_DIR.mkdir(parents=True, exist_ok=True)
+    COOKIE_POLICY_DIR.mkdir(parents=True, exist_ok=True)
     PDF_DIR.mkdir(parents=True, exist_ok=True)
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     custom_site_logo = ROOT / SITE_LOGO_FILE
@@ -4147,9 +4340,11 @@ def build_site() -> list[Article]:
         root_prefix="../",
         body_class="static-page",
     )
+    cookie_policy_html = render_cookie_policy_page()
 
     (WHO_DIR / "index.html").write_text(who_html, encoding="utf-8")
     (CONTACT_DIR / "index.html").write_text(contact_html, encoding="utf-8")
+    (COOKIE_POLICY_DIR / "index.html").write_text(cookie_policy_html, encoding="utf-8")
     (SEARCH_DIR / "index.html").write_text(render_search_page(articles), encoding="utf-8")
     (SITE_DIR / "index.html").write_text(render_home_page(articles), encoding="utf-8")
     (SITE_DIR / "publicar.html").write_text(render_upload_page(articles), encoding="utf-8")

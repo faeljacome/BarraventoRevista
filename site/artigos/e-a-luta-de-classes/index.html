@@ -22,10 +22,139 @@
   <meta name="twitter:image" content="/uploads/e-a-luta-de-classes.png">
   <link rel="icon" href="../../assets/logo_revista.png">
   <link rel="stylesheet" href="../../styles/site.css">
-  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"aa","description":"Frederico Lambertucci","datePublished":"2026-03-21T23:54:33.872105","dateModified":"2026-03-21T23:54:33.872105","author":{"@type":"Person","name":"Freed Lambertucci"},"publisher":{"@type":"Organization","name":"Revista Barravento","logo":{"@type":"ImageObject","url":"/assets/logo_revista.png"}},"mainEntityOfPage":"/artigos/e-a-luta-de-classes/index.html","image":["/uploads/e-a-luta-de-classes.png"],"articleSection":["Editoriais","Entrevistas"],"keywords":"Editoriais, Entrevistas","inLanguage":"pt-BR"}</script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"aa","description":"Frederico Lambertucci","datePublished":"2026-03-25T14:26:12.246954","dateModified":"2026-03-25T14:26:12.246954","author":{"@type":"Person","name":"Freed Lambertucci"},"publisher":{"@type":"Organization","name":"Revista Barravento","logo":{"@type":"ImageObject","url":"/assets/logo_revista.png"}},"mainEntityOfPage":"/artigos/e-a-luta-de-classes/index.html","image":["/uploads/e-a-luta-de-classes.png"],"articleSection":["Editoriais","Entrevistas"],"keywords":"Editoriais, Entrevistas","inLanguage":"pt-BR"}</script>
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Home","item":"/"},{"@type":"ListItem","position":2,"name":"aa","item":"/artigos/e-a-luta-de-classes/index.html"}]}</script>
 </head>
 <body class="article-page">
+
+  <a class="support-button" href="../../contato/">Apoia-se</a>
+  <section class="cookie-banner" data-cookie-banner hidden aria-live="polite">
+    <div class="cookie-banner__inner">
+      <div class="cookie-banner__copy">
+        <strong>Cookies e tecnologias semelhantes</strong>
+        <p>Usamos um cookie necessario para a area de membros e recurso opcional de desempenho para leituras e mais lidos. Os opcionais ficam desligados por padrao.</p>
+        <a href="../../politica-de-cookies/">Ler a Politica de Cookies</a>
+      </div>
+      <div class="cookie-banner__actions">
+        <button class="button-link button-link--ghost" type="button" data-cookie-reject>Rejeitar opcionais</button>
+        <button class="button-link" type="button" data-cookie-accept>Aceitar opcionais</button>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    (() => {
+      const consentKey = "barravento-cookie-preferences";
+      const performanceKeys = ["barravento-read-counts"];
+      const performancePrefixes = ["barravento-read-stamp:"];
+      const policyLink = "../../politica-de-cookies/";
+      const banner = document.querySelector("[data-cookie-banner]");
+      const openButton = document.querySelector("[data-cookie-open]");
+
+      function defaults() {
+        return {
+          necessary: true,
+          performance: false,
+          decided: false,
+          updated_at: ""
+        };
+      }
+
+      function readPreferences() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(consentKey) || "null");
+          if (!stored || typeof stored !== "object") {
+            return defaults();
+          }
+          return {
+            necessary: true,
+            performance: Boolean(stored.performance),
+            decided: Boolean(stored.decided),
+            updated_at: String(stored.updated_at || "")
+          };
+        } catch (error) {
+          return defaults();
+        }
+      }
+
+      function clearPerformanceStorage() {
+        try {
+          performanceKeys.forEach((key) => localStorage.removeItem(key));
+          const keysToRemove = [];
+          for (let index = 0; index < localStorage.length; index += 1) {
+            const key = localStorage.key(index) || "";
+            if (performancePrefixes.some((prefix) => key.startsWith(prefix))) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach((key) => localStorage.removeItem(key));
+        } catch (error) {
+          return;
+        }
+      }
+
+      function storePreferences(next) {
+        const payload = {
+          necessary: true,
+          performance: Boolean(next && next.performance),
+          decided: true,
+          updated_at: new Date().toISOString()
+        };
+        try {
+          localStorage.setItem(consentKey, JSON.stringify(payload));
+        } catch (error) {
+          return payload;
+        }
+        if (!payload.performance) {
+          clearPerformanceStorage();
+        }
+        return payload;
+      }
+
+      function applyPreferences(prefs) {
+        if (banner) {
+          banner.hidden = Boolean(prefs.decided);
+        }
+        document.body.dataset.cookieDecision = prefs.decided ? "set" : "pending";
+        document.body.dataset.cookiePerformance = prefs.performance ? "granted" : "denied";
+      }
+
+      function emitPreferences(prefs) {
+        window.dispatchEvent(new CustomEvent("barravento:consent-changed", { detail: prefs }));
+      }
+
+      window.BarraventoConsent = {
+        getPreferences: readPreferences,
+        hasPerformanceConsent() {
+          return Boolean(readPreferences().performance);
+        }
+      };
+
+      const initial = readPreferences();
+      applyPreferences(initial);
+
+      const acceptButton = document.querySelector("[data-cookie-accept]");
+      const rejectButton = document.querySelector("[data-cookie-reject]");
+
+      if (acceptButton) {
+        acceptButton.addEventListener("click", () => {
+          const prefs = storePreferences({ performance: true });
+          applyPreferences(prefs);
+          emitPreferences(prefs);
+        });
+      }
+
+      if (rejectButton) {
+        rejectButton.addEventListener("click", () => {
+          const prefs = storePreferences({ performance: false });
+          applyPreferences(prefs);
+          emitPreferences(prefs);
+        });
+      }
+
+    })();
+  </script>
+
   <div class="page">
     <div class="topline">
       <div class="container topline__inner">
@@ -45,9 +174,7 @@
     <header class="masthead">
       <div class="container masthead__top">
         <a class="masthead__brand" href="../../index.html">
-          <div class="masthead__wordmark">
-            <h1 class="masthead__title">BARRAVENTO</h1>
-          </div>
+          <img class="masthead__symbol" src="../../assets/logo_farol.png" alt="Farol da Revista Barravento">
         </a>
         <form class="header-search" action="../../busca/" method="get">
           <label class="sr-only" for="site-search">Buscar</label>
@@ -78,7 +205,7 @@
           <div class="meta-row">
             <span>Freed Lambertucci</span>
             <span>3 min de leitura</span>
-            <span>21 de marco de 2026</span>
+            <span>25 de marco de 2026</span>
           </div>
         </div>
       </section>
@@ -106,7 +233,7 @@
             <section class="sidebar-card">
               <h3>Creditos</h3>
               <p><span class="muted-label">Autor</span><br>Freed Lambertucci</p>
-              <p><span class="muted-label">Publicacao</span><br>21 de marco de 2026</p>
+              <p><span class="muted-label">Publicacao</span><br>25 de marco de 2026</p>
               <p><a class="article-card__link" href="../../pdfs/e-a-luta-de-classes.pdf" download>Baixar PDF</a></p>
             </section>
             <section class="sidebar-card">
@@ -119,6 +246,9 @@
 
       <script>
         (() => {
+          if (!window.BarraventoConsent || !window.BarraventoConsent.hasPerformanceConsent()) {
+            return;
+          }
           const storageKey = "barravento-read-counts";
           const stampKey = "barravento-read-stamp:e-a-luta-de-classes";
           const slug = "e-a-luta-de-classes";
@@ -149,6 +279,18 @@
         })();
       </script>
     </main>
+
+
+    <footer class="site-footer">
+      <div class="container site-footer__inner">
+        <p class="site-footer__copy">Revista Barravento.</p>
+        <nav class="site-footer__nav" aria-label="Rodape">
+          <a href="../../quem-somos/">Quem Somos</a>
+          <a href="../../contato/">Contato</a>
+          <a href="../../politica-de-cookies/">Politica de Cookies</a>
+        </nav>
+      </div>
+    </footer>
 
   </div>
   <script>
