@@ -1,14 +1,14 @@
 {
   "articles": {
     "4-lenin-traduzido": {
-      "views": 5,
+      "views": 6,
       "pdf_downloads": 0,
-      "updated_at": "2026-03-22T17:32:31"
+      "updated_at": "2026-03-27T20:37:46"
     },
     "proposta-de-editorial-para-a-revista-barra-vento-2": {
-      "views": 2,
-      "pdf_downloads": 1,
-      "updated_at": "2026-03-21T23:26:53"
+      "views": 4,
+      "pdf_downloads": 3,
+      "updated_at": "2026-03-27T20:12:32"
     },
     "texto-saude-mentaaaal": {
       "views": 4,
@@ -21,14 +21,14 @@
       "updated_at": "2026-03-21T23:54:39"
     },
     "2-o-sobrevivente": {
-      "views": 9,
+      "views": 20,
       "pdf_downloads": 1,
-      "updated_at": "2026-03-22T17:35:37"
+      "updated_at": "2026-03-27T19:58:14"
     },
     "rafael-jacome-curriculo-2023": {
-      "views": 4,
-      "pdf_downloads": 0,
-      "updated_at": "2026-03-22T00:19:51"
+      "views": 5,
+      "pdf_downloads": 1,
+      "updated_at": "2026-03-27T19:58:45"
     },
     "arte-pela-arte-lukacs-traducao-revisao-mt-2": {
       "views": 10,
@@ -46,9 +46,9 @@
       "updated_at": "2026-03-22T17:26:22"
     },
     "arte-pela-arte-lukacs-traducao-revisao-mt": {
-      "views": 1,
+      "views": 2,
       "pdf_downloads": 0,
-      "updated_at": "2026-03-22T17:33:07"
+      "updated_at": "2026-03-27T20:37:49"
     }
   }
 }
