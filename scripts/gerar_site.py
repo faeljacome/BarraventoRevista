@@ -38,6 +38,8 @@ PDF_DIR = SITE_DIR / "pdfs"
 INPUT_DIR = ROOT / "conteudo" / "entrada-docx"
 PROCESSED_DIR = ROOT / "conteudo" / "processados"
 UPLOADS_DIR = SITE_DIR / "uploads"
+BACKUPS_DIR = ROOT / "dados" / "backups"
+TEXT_BACKUP_ARCHIVE = BACKUPS_DIR / "textos-publicados.zip"
 
 WORD_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 DOCX_DRAWING_NS = {
@@ -1980,6 +1982,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               <h3>Recados para membros</h3>
               <p>Esse mural fica visivel para todos os membros logados. Escreva e publique um recado abaixo.</p>
             </div>
+            <p class="field-help">Os recados e retornos do Conselho Editorial ficam disponiveis por ate 2 meses e depois sao removidos automaticamente.</p>
             <form id="notice-form" class="upload-form">
               <label class="field">
                 <span>Novo recado</span>
@@ -3081,17 +3084,46 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             return false;
           }}
 
+          function formatDateTime(value) {{
+            const stamp = String(value || "").trim();
+            if (!stamp) {{
+              return "";
+            }}
+            const parsed = new Date(stamp);
+            if (Number.isNaN(parsed.getTime())) {{
+              return escapeHtml(stamp);
+            }}
+            return escapeHtml(new Intl.DateTimeFormat("pt-BR", {{
+              dateStyle: "long",
+              timeStyle: "short"
+            }}).format(parsed));
+          }}
+
           function formatMessage(value) {{
             return escapeHtml(value).replace(/\\n/g, "<br>");
           }}
 
+          function submissionKindLabel(kind) {{
+            if (kind === "edit") {{
+              return "Edicao pendente";
+            }}
+            if (kind === "delete") {{
+              return "Exclusao pendente";
+            }}
+            return "Inclusao pendente";
+          }}
+
           function renderNotice(item) {{
+            const variant = ["success", "danger"].includes(String(item.variant || "").trim()) ? String(item.variant).trim() : "neutral";
+            const metaLabel = item.scope === "private" ? "Retorno do Conselho Editorial" : (item.author_name || "Membro");
+            const title = String(item.title || "").trim();
             return (
-              '<article class="member-notice">' +
+              '<article class="member-notice member-notice--' + variant + '">' +
                 '<div class="member-notice__meta">' +
-                  '<strong>' + escapeHtml(item.author_name || "Membro") + '</strong>' +
-                  '<span>' + escapeHtml(item.created_at || "") + '</span>' +
+                  '<strong>' + escapeHtml(metaLabel) + '</strong>' +
+                  '<span>' + formatDateTime(item.created_at || "") + '</span>' +
                 '</div>' +
+                (title ? '<h4 class="member-notice__title">' + escapeHtml(title) + '</h4>' : '') +
                 '<p>' + formatMessage(item.message || "") + '</p>' +
               '</article>'
             );
@@ -3130,13 +3162,19 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
 
           function renderRegistrationApproval(item) {{
             return (
-              '<article class="member-notice">' +
-                '<div class="member-notice__meta">' +
-                  '<strong>' + escapeHtml(item.name || item.email || "Cadastro") + '</strong>' +
+              '<article class="approval-card">' +
+                '<div class="approval-card__header">' +
+                  '<div>' +
+                    '<span class="approval-card__eyebrow">Cadastro pendente</span>' +
+                    '<h4>' + escapeHtml(item.name || item.email || "Cadastro") + '</h4>' +
+                  '</div>' +
+                  '<span class="approval-card__stamp">' + formatDateTime(item.created_at || "") + '</span>' +
+                '</div>' +
+                '<div class="approval-card__details">' +
+                  '<span>' + escapeHtml(item.email || "") + '</span>' +
                   '<span>' + escapeHtml(item.role_label || "") + '</span>' +
                 '</div>' +
-                '<p>' + escapeHtml(item.email || "") + '<br>' + escapeHtml(item.created_at || "") + '</p>' +
-                '<div class="upload-actions">' +
+                '<div class="approval-card__actions">' +
                   '<button class="button-link approval-action" type="button" data-approve-registration="' + escapeHtml(item.email || "") + '">Aprovar cadastro</button>' +
                 '</div>' +
               '</article>'
@@ -3145,20 +3183,28 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
 
           function renderSubmissionApproval(item) {{
             const author = item.requested_by || {{}};
-            const subtitle = item.kind === "edit"
-              ? "Edicao pendente"
-              : item.kind === "delete"
-                ? "Exclusao pendente"
-                : "Novo texto pendente";
+            const previewUrl = String(item.preview_url || "").trim();
             return (
-              '<article class="member-notice">' +
-                '<div class="member-notice__meta">' +
-                  '<strong>' + escapeHtml(item.title || item.slug || "Solicitacao") + '</strong>' +
-                  '<span>' + escapeHtml(subtitle) + '</span>' +
+              '<article class="approval-card">' +
+                '<div class="approval-card__header">' +
+                  '<div>' +
+                    '<span class="approval-card__eyebrow">' + escapeHtml(submissionKindLabel(item.kind)) + '</span>' +
+                    '<h4>' + escapeHtml(item.title || item.slug || "Solicitacao") + '</h4>' +
+                  '</div>' +
+                  '<span class="approval-card__stamp">' + formatDateTime(item.requested_at || "") + '</span>' +
                 '</div>' +
-                '<p>' + escapeHtml(author.name || author.email || "Membro") + ' - ' + escapeHtml(author.role_label || "") + '<br>' + escapeHtml(item.requested_at || "") + '</p>' +
-                '<div class="upload-actions">' +
+                '<div class="approval-card__details">' +
+                  '<span>Solicitado por <strong>' + escapeHtml(author.name || author.email || "Membro") + '</strong></span>' +
+                  '<span>' + escapeHtml(author.role_label || "") + '</span>' +
+                '</div>' +
+                '<label class="approval-reason">' +
+                  '<span>Motivo da recusa</span>' +
+                  '<textarea rows="2" placeholder="Explique brevemente o motivo." data-rejection-reason></textarea>' +
+                '</label>' +
+                '<div class="approval-card__actions">' +
+                  (previewUrl ? '<a class="button-link button-link--ghost approval-action" href="' + escapeHtml(previewUrl) + '" target="_blank" rel="noopener noreferrer">Ver previa</a>' : '') +
                   '<button class="button-link approval-action" type="button" data-approve-submission="' + escapeHtml(item.id || "") + '">Aprovar publicacao</button>' +
+                  '<button class="button-link button-link--ghost button-link--danger approval-action" type="button" data-reject-submission="' + escapeHtml(item.id || "") + '">Recusar</button>' +
                 '</div>' +
               '</article>'
             );
@@ -3805,6 +3851,35 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               }} catch (error) {{
                 setStatus(approvalsStatus, "error", escapeHtml(error.message));
               }}
+              return;
+            }}
+
+            const rejectionButton = event.target.closest("[data-reject-submission]");
+            if (rejectionButton) {{
+              if (!requireMember(approvalsStatus)) {{
+                return;
+              }}
+              const approvalCard = rejectionButton.closest(".approval-card");
+              const reasonField = approvalCard ? approvalCard.querySelector("[data-rejection-reason]") : null;
+              const reason = reasonField ? String(reasonField.value || "").trim() : "";
+              if (reason.length < 3) {{
+                setStatus(approvalsStatus, "error", "Informe um motivo curto para a recusa.");
+                if (reasonField) {{
+                  reasonField.focus();
+                }}
+                return;
+              }}
+              setStatus(approvalsStatus, "pending", "Recusando publicacao...");
+              try {{
+                await submitJson("/api/members/approvals/submissions/reject", {{
+                  id: rejectionButton.dataset.rejectSubmission,
+                  reason
+                }});
+                await loadApprovals();
+                setStatus(approvalsStatus, "success", "Publicacao recusada com sucesso.");
+              }} catch (error) {{
+                setStatus(approvalsStatus, "error", escapeHtml(error.message));
+              }}
             }}
           }});
         }})();
@@ -4147,9 +4222,17 @@ def render_article_page(article: Article) -> str:
 
             <section class="sidebar-card">
               <h3>Creditos</h3>
-              <p><span class="muted-label">Autor</span><br>{escape(article.author)}</p>
-              <p><span class="muted-label">Publicacao</span><br>{escape(published)}</p>
-              <p><a class="article-card__link" href="{pdf_href(article, '../../')}" download>Baixar PDF</a></p>
+              <div class="article-credits">
+                <div class="article-credit-item">
+                  <span class="muted-label article-credit-label">autor</span>
+                  <span class="article-credit-value">{escape(article.author)}</span>
+                </div>
+                <div class="article-credit-item">
+                  <span class="muted-label article-credit-label">publicacao</span>
+                  <span class="article-credit-value">{escape(published)}</span>
+                </div>
+              </div>
+              <p><a class="article-card__link article-pdf-link category-badge" href="{pdf_href(article, '../../')}" download>Baixar PDF</a></p>
             </section>
 {render_tag_cloud("Tags", article.tags)}{render_tag_cloud("Hashtags", article.hashtags)}            <section class="sidebar-card">
               <h3>Navegacao</h3>
@@ -4240,6 +4323,20 @@ def clear_stale_pdf_files(valid_names: set[str]) -> None:
     for child in PDF_DIR.glob("*.pdf"):
         if child.name not in valid_names:
             child.unlink()
+
+
+def rebuild_text_backup_archive(articles: list[Article]) -> None:
+    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+    temp_archive = TEXT_BACKUP_ARCHIVE.with_suffix(".zip.tmp")
+    with zipfile.ZipFile(temp_archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for article in sorted(articles, key=lambda item: item.slug):
+            docx_path = PROCESSED_DIR / f"{article.slug}.docx"
+            html_path = ARTICLES_DIR / article.slug / "index.html"
+            if docx_path.exists():
+                archive.write(docx_path, arcname=str(docx_path.relative_to(ROOT)).replace("\\", "/"))
+            if html_path.exists():
+                archive.write(html_path, arcname=str(html_path.relative_to(ROOT)).replace("\\", "/"))
+    temp_archive.replace(TEXT_BACKUP_ARCHIVE)
 
 
 def render_robots_txt() -> str:
@@ -4367,6 +4464,7 @@ def build_site() -> list[Article]:
     sitemap_xml = render_sitemap_xml(articles)
     if sitemap_xml:
         (SITE_DIR / "sitemap.xml").write_text(sitemap_xml, encoding="utf-8")
+    rebuild_text_backup_archive(articles)
     return articles
 
 

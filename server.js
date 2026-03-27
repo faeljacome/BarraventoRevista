@@ -22,6 +22,8 @@ const STATS_FILE = path.join(DATA_DIR, "estatisticas.json");
 const SUBMISSIONS_FILE = path.join(DATA_DIR, "submissoes.json");
 const SUBMISSIONS_DIR = path.join(DATA_DIR, "submissoes");
 const DOCX_IMPORTS_DIR = path.join(DATA_DIR, "docx-imports");
+const DOCX_IMPORT_TTL_MS = 1000 * 60 * 60 * 24;
+const NOTICE_RETENTION_MS = 1000 * 60 * 60 * 24 * 60;
 
 const SESSION_COOKIE_NAME = "barravento_member_session";
 const SESSION_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
@@ -374,18 +376,71 @@ function importedDocxFilePath(importId) {
   return path.join(DOCX_IMPORTS_DIR, path.basename(String(importId || "").trim()));
 }
 
+function cleanupImportedDocx(importId) {
+  const safeId = path.basename(String(importId || "").trim());
+  if (!safeId) {
+    return;
+  }
+  deleteIfExists(importedDocxFilePath(safeId));
+  deleteIfExists(importedDocxMetaPath(safeId));
+}
+
+function cleanupExpiredImportedDocx(maxAgeMs = DOCX_IMPORT_TTL_MS) {
+  if (!fs.existsSync(DOCX_IMPORTS_DIR)) {
+    return;
+  }
+  const now = Date.now();
+  for (const entry of fs.readdirSync(DOCX_IMPORTS_DIR)) {
+    const fullPath = path.join(DOCX_IMPORTS_DIR, entry);
+    const stat = fs.statSync(fullPath);
+    if (!stat.isFile() || !entry.toLowerCase().endsWith(".json")) {
+      continue;
+    }
+    const metadata = readJsonFile(fullPath, {});
+    const stamp = String(metadata.last_used_at || metadata.created_at || "").trim();
+    const recordedTime = stamp ? new Date(stamp).getTime() : 0;
+    const referenceTime = Number.isFinite(recordedTime) && recordedTime > 0 ? recordedTime : stat.mtimeMs;
+    if (now - referenceTime <= maxAgeMs) {
+      continue;
+    }
+    const importId = entry.replace(/\.json$/i, "");
+    cleanupImportedDocx(importId);
+  }
+
+  for (const entry of fs.readdirSync(DOCX_IMPORTS_DIR)) {
+    const fullPath = path.join(DOCX_IMPORTS_DIR, entry);
+    const stat = fs.statSync(fullPath);
+    if (!stat.isFile() || !entry.toLowerCase().endsWith(".docx")) {
+      continue;
+    }
+    if (fs.existsSync(importedDocxMetaPath(entry))) {
+      continue;
+    }
+    if (now - stat.mtimeMs > maxAgeMs) {
+      deleteIfExists(fullPath);
+    }
+  }
+}
+
 function saveImportedDocx(file) {
   if (!file || !file.buffer?.length) {
     throw createError(400, "Selecione um arquivo .docx para importar.");
   }
   const originalname = sanitizeDocxName(file.originalname);
+  cleanupExpiredImportedDocx();
   ensureDir(DOCX_IMPORTS_DIR);
-  const importId = `${Date.now()}-${crypto.randomBytes(6).toString("hex")}-${slugify(path.parse(originalname).name) || "texto"}.docx`;
-  fs.writeFileSync(importedDocxFilePath(importId), file.buffer);
+  const hash = crypto.createHash("sha256").update(file.buffer).digest("hex").slice(0, 24);
+  const importId = `${hash}-${slugify(path.parse(originalname).name) || "texto"}.docx`;
+  const docxPath = importedDocxFilePath(importId);
+  if (!fs.existsSync(docxPath)) {
+    fs.writeFileSync(docxPath, file.buffer);
+  }
   writeJsonFile(importedDocxMetaPath(importId), {
     import_id: importId,
     originalname,
-    created_at: new Date().toISOString().slice(0, 19)
+    size: file.buffer.length,
+    created_at: new Date().toISOString().slice(0, 19),
+    last_used_at: new Date().toISOString().slice(0, 19)
   });
   return {
     import_id: importId,
@@ -394,6 +449,7 @@ function saveImportedDocx(file) {
 }
 
 function loadImportedDocx(importId) {
+  cleanupExpiredImportedDocx();
   const safeId = path.basename(String(importId || "").trim());
   if (!safeId) {
     return null;
@@ -404,6 +460,13 @@ function loadImportedDocx(importId) {
   }
   const metadata = readJsonFile(importedDocxMetaPath(safeId), {});
   const buffer = fs.readFileSync(docxPath);
+  writeJsonFile(importedDocxMetaPath(safeId), {
+    import_id: safeId,
+    originalname: sanitizeDocxName(metadata.originalname || safeId),
+    size: buffer.length,
+    created_at: String(metadata.created_at || "").trim() || new Date().toISOString().slice(0, 19),
+    last_used_at: new Date().toISOString().slice(0, 19)
+  });
   return {
     fieldname: "docx",
     originalname: sanitizeDocxName(metadata.originalname || safeId),
@@ -428,6 +491,10 @@ function resolveDocxInput(req, { required = false, message } = {}) {
     throw createError(400, message || "Selecione um arquivo .docx para continuar.");
   }
   return null;
+}
+
+function releaseRequestImportedDocx(req) {
+  cleanupImportedDocx(req?.body?.docx_import_id);
 }
 
 function sanitizeImageName(filename) {
@@ -1174,7 +1241,25 @@ function editArticle(req) {
 function readNotices() {
   const raw = readJsonFile(NOTICES_FILE, { items: [] });
   const items = Array.isArray(raw.items) ? raw.items : [];
-  return items.filter((item) => item && item.message);
+  let changed = false;
+  const now = Date.now();
+  const kept = items.filter((item) => {
+    if (!item || !item.message) {
+      changed = true;
+      return false;
+    }
+    const stamp = String(item.created_at || "").trim();
+    const createdTime = stamp ? new Date(stamp).getTime() : 0;
+    const keep = !createdTime || !Number.isFinite(createdTime) || now - createdTime <= NOTICE_RETENTION_MS;
+    if (!keep) {
+      changed = true;
+    }
+    return keep;
+  });
+  if (changed) {
+    writeJsonFile(NOTICES_FILE, { items: kept.slice(0, 200) });
+  }
+  return kept;
 }
 
 function addNotice(member, message) {
@@ -1187,11 +1272,58 @@ function addNotice(member, message) {
     message: normalized,
     author_name: member.name || "Membro",
     author_email: member.email || "",
-    created_at: new Date().toISOString().slice(0, 19)
+    created_at: new Date().toISOString().slice(0, 19),
+    scope: "public",
+    variant: "neutral"
   };
   const notices = readNotices();
   notices.unshift(notice);
-  writeJsonFile(NOTICES_FILE, { items: notices.slice(0, 100) });
+  writeJsonFile(NOTICES_FILE, { items: notices.slice(0, 200) });
+  return notice;
+}
+
+function memberVisibleNotices(member) {
+  const viewerEmail = normalizeEmail(member?.email);
+  return readNotices().filter((item) => {
+    const scope = String(item.scope || "public").trim().toLowerCase();
+    if (scope !== "private") {
+      return true;
+    }
+    return normalizeEmail(item.recipient_email) === viewerEmail;
+  });
+}
+
+function addSubmissionOutcomeNotice(submission, outcome, reason = "") {
+  const recipientEmail = normalizeEmail(submission?.requested_by?.email);
+  if (!recipientEmail) {
+    return null;
+  }
+  const normalizedOutcome = outcome === "rejected" ? "rejected" : "approved";
+  const normalizedReason = String(reason || "").replace(/\r\n/g, "\n").trim();
+  const actionLabel = submission?.kind === "edit"
+    ? "edicao"
+    : submission?.kind === "delete"
+      ? "exclusao"
+      : "publicacao";
+  const title = String(submission?.title || submission?.slug || submission?.source_name || "Solicitacao").trim();
+  const message = normalizedOutcome === "approved"
+    ? `Sua ${actionLabel} de "${title}" foi aprovada pelo Conselho Editorial.`
+    : `Sua ${actionLabel} de "${title}" foi recusada pelo Conselho Editorial.${normalizedReason ? `\n\nMotivo: ${normalizedReason}` : ""}`;
+  const notice = {
+    id: crypto.randomBytes(8).toString("hex"),
+    message,
+    author_name: "Conselho Editorial",
+    author_email: "",
+    created_at: new Date().toISOString().slice(0, 19),
+    scope: "private",
+    recipient_email: recipientEmail,
+    variant: normalizedOutcome === "approved" ? "success" : "danger",
+    title,
+    related_submission_id: String(submission?.id || "").trim()
+  };
+  const notices = readNotices();
+  notices.unshift(notice);
+  writeJsonFile(NOTICES_FILE, { items: notices.slice(0, 200) });
   return notice;
 }
 
@@ -1211,17 +1343,207 @@ function pendingSubmissionItems() {
     .sort((left, right) => String(right.requested_at || "").localeCompare(String(left.requested_at || "")));
 }
 
+function submissionDirPath(submissionId) {
+  return path.join(SUBMISSIONS_DIR, String(submissionId || "").trim());
+}
+
 function saveSubmissionFile(submissionId, file, suffixOverride) {
   if (!file || !file.buffer?.length) {
     return "";
   }
-  const targetDir = path.join(SUBMISSIONS_DIR, submissionId);
+  const targetDir = submissionDirPath(submissionId);
   ensureDir(targetDir);
   const suffix = suffixOverride || path.extname(file.originalname || "");
   const safeBase = slugify(path.parse(file.originalname || "arquivo").name);
   const targetName = `${safeBase}${suffix}`;
   fs.writeFileSync(path.join(targetDir, targetName), file.buffer);
   return targetName;
+}
+
+function submissionPreviewFilePath(submissionId) {
+  return path.join(submissionDirPath(submissionId), "preview.html");
+}
+
+function submissionPreviewAssetUrl(submissionId, filename) {
+  const safeId = encodeURIComponent(String(submissionId || "").trim());
+  const safeName = encodeURIComponent(path.basename(String(filename || "").trim()));
+  if (!safeId || !safeName) {
+    return "";
+  }
+  return `/membros/previas/submissoes/${safeId}/arquivo/${safeName}`;
+}
+
+function renderSubmissionPreviewBlocks(bodyBlocks) {
+  const blocks = parseBodyBlocksField(bodyBlocks);
+  if (!blocks.length) {
+    return "";
+  }
+  return blocks.map((block) => {
+    const alignClass = block.align && block.align !== "left" ? ` article-body__block--${block.align}` : "";
+    if (block.kind === "heading") {
+      const level = Math.max(1, Math.min(3, Number(block.level || 2) || 2));
+      return `<h${level + 1} class="article-body__heading${alignClass}">${escapeHtml(block.text || "")}</h${level + 1}>`;
+    }
+    if (block.kind === "divider") {
+      return '<hr class="article-body__divider">';
+    }
+    if (block.kind === "quote") {
+      return `<blockquote class="article-body__quote${alignClass}">${block.html || `<p>${escapeHtml(block.text || "")}</p>`}</blockquote>`;
+    }
+    if (block.kind === "list") {
+      return `<div class="article-body__list${alignClass}">${block.html || ""}</div>`;
+    }
+    return `<p class="article-body__paragraph${alignClass}">${block.html || escapeHtml(block.text || "")}</p>`;
+  }).join("\n");
+}
+
+function resolveSubmissionPreviewImage(submission) {
+  const imageFile = String(submission.image_file || "").trim();
+  if (imageFile) {
+    return submissionPreviewAssetUrl(submission.id, imageFile);
+  }
+  const slug = slugify(submission.slug);
+  if (!slug) {
+    return "";
+  }
+  const currentArticle = loadArticleBySlug(slug);
+  if (!currentArticle || !currentArticle.image_file) {
+    return "";
+  }
+  return `/${currentArticle.image_scope || "uploads"}/${encodeURIComponent(currentArticle.image_file)}`;
+}
+
+function buildSubmissionPreviewHtml(submission) {
+  const title = String(submission.title || submission.slug || submission.source_name || "Sem titulo").trim();
+  const author = String(submission.author || "").trim();
+  const summary = String(submission.summary || "").trim();
+  const categories = Array.isArray(submission.categories) ? submission.categories.filter(Boolean) : [];
+  const requestedBy = submission.requested_by && typeof submission.requested_by === "object" ? submission.requested_by : {};
+  const requestedAt = String(submission.requested_at || "").trim();
+  const previewImage = resolveSubmissionPreviewImage(submission);
+  const bodyHtml = sanitizeArticleHtml(submission.body_html || "");
+  const renderedBlocks = renderSubmissionPreviewBlocks(submission.body_blocks || []);
+  const articleBody = bodyHtml || renderedBlocks || "<p>Previa indisponivel para esta solicitacao.</p>";
+  const categoryBadges = categories.length
+    ? categories.map((category) => `<span class="category-badge">${escapeHtml(category)}</span>`).join("")
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Previa interna | ${escapeHtml(title)}</title>
+    <link rel="stylesheet" href="/styles/site.css">
+    <style>
+      body.preview-page { background: #f6f1eb; }
+      .preview-shell { padding: 32px 0 64px; }
+      .preview-banner { margin-bottom: 24px; padding: 18px 22px; border: 1px solid rgba(141, 47, 35, 0.16); border-radius: 18px; background: rgba(255, 255, 255, 0.92); color: #4d342d; }
+      .preview-banner strong { display: block; margin-bottom: 4px; color: #8d2f23; font-size: 0.78rem; letter-spacing: 0.12em; text-transform: uppercase; }
+      .preview-banner p { margin: 0; }
+      .preview-meta { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-top: 10px; font-size: 0.95rem; color: #6d554c; }
+      .preview-meta span { white-space: nowrap; }
+      .preview-summary { margin: 18px 0 0; font-size: 1.05rem; color: #4b3a34; }
+      .preview-categories { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+      .preview-cover { margin: 24px 0 0; }
+      .preview-cover img { width: 100%; max-height: 520px; object-fit: cover; border-radius: 24px; display: block; }
+      .article-body__block--center, .article-body__paragraph--center, .article-body__heading--center, .article-body__quote--center, .article-body__list--center { text-align: center; }
+      .article-body__block--right, .article-body__paragraph--right, .article-body__heading--right, .article-body__quote--right, .article-body__list--right { text-align: right; }
+      .article-body__block--justify, .article-body__paragraph--justify, .article-body__heading--justify, .article-body__quote--justify, .article-body__list--justify { text-align: justify; }
+      .article-body__divider { margin: 2.5rem 0; border: 0; border-top: 1px solid rgba(141, 47, 35, 0.18); }
+      .article-body__quote { margin: 2rem 0; padding-left: 20px; border-left: 3px solid #8d2f23; color: #5c4540; }
+      .article-body__list ul, .article-body__list ol { padding-left: 1.4rem; }
+    </style>
+  </head>
+  <body class="preview-page">
+    <main class="preview-shell">
+      <div class="container">
+        <section class="preview-banner">
+          <strong>Previa interna para aprovacao</strong>
+          <p>Este HTML pertence a uma submissao pendente e nao fica visivel no site publico ate a aprovacao do Conselho Editorial.</p>
+          <div class="preview-meta">
+            <span>Solicitado por: ${escapeHtml(requestedBy.name || requestedBy.email || "Membro")}</span>
+            <span>Perfil: ${escapeHtml(requestedBy.role_label || requestedBy.role || "membro")}</span>
+            <span>Enviado em: ${escapeHtml(requestedAt)}</span>
+          </div>
+        </section>
+
+        <article class="article-page">
+          <header class="article-hero">
+            <div class="article-hero__copy">
+              ${categoryBadges ? `<div class="preview-categories">${categoryBadges}</div>` : ""}
+              <h1>${escapeHtml(title)}</h1>
+              ${author ? `<p class="article-hero__author">${escapeHtml(author)}</p>` : ""}
+              ${summary ? `<p class="preview-summary">${escapeHtml(summary)}</p>` : ""}
+            </div>
+            ${previewImage ? `<figure class="preview-cover"><img src="${escapeHtml(previewImage)}" alt="${escapeHtml(title)}"></figure>` : ""}
+          </header>
+          <section class="article-body prose">
+            ${articleBody}
+          </section>
+        </article>
+      </div>
+    </main>
+  </body>
+</html>`;
+}
+
+function writeSubmissionPreview(submission) {
+  if (!submission || typeof submission !== "object") {
+    return "";
+  }
+  if (!["create", "edit"].includes(String(submission.kind || "").trim())) {
+    return "";
+  }
+  const targetDir = submissionDirPath(submission.id);
+  ensureDir(targetDir);
+  const previewPath = submissionPreviewFilePath(submission.id);
+  fs.writeFileSync(previewPath, buildSubmissionPreviewHtml(submission), "utf8");
+  return previewPath;
+}
+
+function compactSubmissionPayload(payload) {
+  const next = { ...(payload || {}) };
+  const bodyBlocks = parseBodyBlocksField(next.body_blocks || []);
+  if (bodyBlocks.length) {
+    next.body_blocks = bodyBlocks;
+    delete next.body;
+    delete next.body_html;
+  }
+  return next;
+}
+
+function clearSubmissionArtifacts(submission) {
+  if (!submission || typeof submission !== "object") {
+    return submission;
+  }
+  deleteIfExists(submissionDirPath(submission.id));
+  const next = { ...submission };
+  delete next.docx_file;
+  delete next.image_file;
+  return next;
+}
+
+function cleanupStoredSubmissions() {
+  const items = readSubmissions();
+  let changed = false;
+  const nextItems = items.map((item) => {
+    let next = compactSubmissionPayload(item);
+    if (JSON.stringify(next) !== JSON.stringify(item)) {
+      changed = true;
+    }
+    if (String(next.status || "pending") !== "pending") {
+      const cleaned = clearSubmissionArtifacts(next);
+      if (JSON.stringify(cleaned) !== JSON.stringify(next)) {
+        changed = true;
+      }
+      return cleaned;
+    }
+    return next;
+  });
+  if (changed) {
+    writeSubmissions(nextItems);
+  }
 }
 
 function fieldCsvText(values) {
@@ -1245,7 +1567,7 @@ function createPendingSubmission({ kind, member, payload, docx, image }) {
     status: "pending",
     requested_at: new Date().toISOString().slice(0, 19),
     requested_by: submissionRequester(member),
-    ...payload
+    ...compactSubmissionPayload(payload)
   };
 
   if (docx && docx.buffer?.length) {
@@ -1259,6 +1581,7 @@ function createPendingSubmission({ kind, member, payload, docx, image }) {
 
   const items = readSubmissions();
   items.push(submission);
+  writeSubmissionPreview(submission);
   writeSubmissions(items);
   return submission;
 }
@@ -1299,6 +1622,7 @@ function createArticleSubmission(req, member) {
     docx,
     image
   });
+  releaseRequestImportedDocx(req);
   return {
     ok: true,
     pending: true,
@@ -1387,6 +1711,7 @@ function editArticleSubmission(req, member) {
     docx: newDocx,
     image: newImage
   });
+  releaseRequestImportedDocx(req);
 
   return {
     ok: true,
@@ -1402,7 +1727,7 @@ function submissionFile(submission, key) {
   if (!storedName) {
     return null;
   }
-  const targetPath = path.join(SUBMISSIONS_DIR, String(submission.id || "").trim(), storedName);
+  const targetPath = path.join(submissionDirPath(submission.id), storedName);
   if (!fs.existsSync(targetPath)) {
     return null;
   }
@@ -1481,9 +1806,32 @@ function approveSubmissionItem(submissionId) {
 
   submission.status = "approved";
   submission.approved_at = new Date().toISOString().slice(0, 19);
-  items[index] = submission;
+  items[index] = clearSubmissionArtifacts(compactSubmissionPayload(submission));
   writeSubmissions(items);
   return result;
+}
+
+function rejectSubmissionItem(submissionId) {
+  const items = readSubmissions();
+  const index = items.findIndex((item) => String(item.id || "") === String(submissionId || ""));
+  if (index < 0) {
+    throw createError(404, "Solicitacao pendente nao encontrada.");
+  }
+
+  const submission = items[index];
+  if (String(submission.status || "pending") !== "pending") {
+    throw createError(400, "Esta solicitacao ja foi processada.");
+  }
+
+  submission.status = "rejected";
+  submission.rejected_at = new Date().toISOString().slice(0, 19);
+  items[index] = clearSubmissionArtifacts(compactSubmissionPayload(submission));
+  writeSubmissions(items);
+  return {
+    ok: true,
+    id: String(submission.id || "").trim(),
+    title: String(submission.title || submission.slug || submission.source_name || "Sem titulo").trim()
+  };
 }
 
 function readStats() {
@@ -1641,10 +1989,10 @@ app.post("/api/members/logout", (req, res) => {
   });
 });
 
-app.get("/api/members/notices", requireMember, (_req, res) => {
+app.get("/api/members/notices", requireMember, (req, res) => {
   res.json({
     ok: true,
-    items: readNotices()
+    items: memberVisibleNotices(req.member)
   });
 });
 
@@ -1676,7 +2024,10 @@ app.get("/api/members/approvals", requireMember, requireAdmin, (req, res) => {
     slug: String(item.slug || "").trim(),
     requested_at: String(item.requested_at || "").trim(),
     requested_by: item.requested_by || {},
-    categories: Array.isArray(item.categories) ? item.categories.filter(Boolean) : []
+    categories: Array.isArray(item.categories) ? item.categories.filter(Boolean) : [],
+    preview_url: ["create", "edit"].includes(String(item.kind || "").trim())
+      ? `/membros/previas/submissoes/${encodeURIComponent(String(item.id || "").trim())}`
+      : (item.slug ? `/artigos/${item.slug}/` : "")
   }));
   res.json({
     ok: true,
@@ -1703,12 +2054,78 @@ app.post("/api/members/approvals/registrations/approve", requireMember, requireA
 app.post("/api/members/approvals/submissions/approve", requireMember, requireAdmin, (req, res, next) => {
   try {
     const result = approveSubmissionItem(req.body.id);
+    const items = readSubmissions();
+    const approvedItem = items.find((item) => String(item.id || "") === String(req.body.id || ""));
+    if (approvedItem) {
+      addSubmissionOutcomeNotice(approvedItem, "approved");
+    }
     res.json({
       ok: true,
       message: "Publicacao aprovada com sucesso.",
       member: req.member,
       result
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/members/approvals/submissions/reject", requireMember, requireAdmin, (req, res, next) => {
+  try {
+    const reason = String(req.body.reason || "").replace(/\r\n/g, "\n").trim();
+    if (reason.length < 3) {
+      throw createError(400, "Informe um motivo curto para a recusa.");
+    }
+    const result = rejectSubmissionItem(req.body.id);
+    const items = readSubmissions();
+    const rejectedItem = items.find((item) => String(item.id || "") === String(req.body.id || ""));
+    if (rejectedItem) {
+      addSubmissionOutcomeNotice(rejectedItem, "rejected", reason);
+    }
+    res.json({
+      ok: true,
+      message: "Publicacao recusada com sucesso.",
+      member: req.member,
+      result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/membros/previas/submissoes/:id", requireMember, requireAdmin, (req, res, next) => {
+  try {
+    const submissionId = String(req.params.id || "").trim();
+    const submission = readSubmissions().find((item) => String(item.id || "") === submissionId);
+    if (!submission || String(submission.status || "pending") !== "pending") {
+      throw createError(404, "Previa da submissao nao encontrada.");
+    }
+    const previewPath = submissionPreviewFilePath(submissionId);
+    if (!fs.existsSync(previewPath)) {
+      writeSubmissionPreview(submission);
+    }
+    if (!fs.existsSync(previewPath)) {
+      throw createError(404, "Arquivo de previa nao encontrado.");
+    }
+    res.sendFile(previewPath);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/membros/previas/submissoes/:id/arquivo/:filename", requireMember, requireAdmin, (req, res, next) => {
+  try {
+    const submissionId = String(req.params.id || "").trim();
+    const filename = path.basename(String(req.params.filename || "").trim());
+    const submission = readSubmissions().find((item) => String(item.id || "") === submissionId);
+    if (!submission || String(submission.status || "pending") !== "pending") {
+      throw createError(404, "Arquivo temporario da submissao nao encontrado.");
+    }
+    const targetPath = path.join(submissionDirPath(submissionId), filename);
+    if (!fs.existsSync(targetPath)) {
+      throw createError(404, "Arquivo temporario da submissao nao encontrado.");
+    }
+    res.sendFile(targetPath);
   } catch (error) {
     next(error);
   }
@@ -1810,6 +2227,9 @@ app.use((error, _req, res, _next) => {
     error: error.message || "Falha interna no servidor Node."
   });
 });
+
+cleanupExpiredImportedDocx();
+cleanupStoredSubmissions();
 
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
