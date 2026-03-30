@@ -1,54 +1,46 @@
 {
   "articles": {
-    "4-lenin-traduzido": {
-      "views": 7,
-      "pdf_downloads": 0,
-      "updated_at": "2026-03-30T12:45:37"
-    },
-    "proposta-de-editorial-para-a-revista-barra-vento-2": {
-      "views": 4,
-      "pdf_downloads": 3,
-      "updated_at": "2026-03-27T20:12:32"
-    },
-    "texto-saude-mentaaaal": {
-      "views": 4,
-      "pdf_downloads": 2,
-      "updated_at": "2026-03-22T17:41:10"
-    },
-    "e-a-luta-de-classes": {
-      "views": 5,
-      "pdf_downloads": 0,
-      "updated_at": "2026-03-21T23:54:39"
-    },
     "2-o-sobrevivente": {
-      "views": 20,
-      "pdf_downloads": 1,
-      "updated_at": "2026-03-27T19:58:14"
+      "views": 24,
+      "pdf_downloads": 6,
+      "updated_at": "2026-03-30T16:28:46",
+      "daily": {
+        "2026-03-27": {
+          "views": 20,
+          "pdf_downloads": 1
+        },
+        "2026-03-30": {
+          "views": 4,
+          "pdf_downloads": 5
+        }
+      },
+      "locations": {
+        "Local|Rede local|Desenvolvimento": 5
+      },
+      "daily_locations": {
+        "2026-03-30": {
+          "Local|Rede local|Desenvolvimento": 5
+        }
+      }
     },
-    "rafael-jacome-curriculo-2023": {
-      "views": 5,
-      "pdf_downloads": 1,
-      "updated_at": "2026-03-27T19:58:45"
-    },
-    "arte-pela-arte-lukacs-traducao-revisao-mt-2": {
-      "views": 10,
-      "pdf_downloads": 2,
-      "updated_at": "2026-03-22T16:58:37"
-    },
-    "balzac-e-a-figura-do-casamento-burguei-s-na-literatura-p1": {
-      "views": 2,
-      "pdf_downloads": 0,
-      "updated_at": "2026-03-22T16:39:56"
-    },
-    "sem-ta-tulo-1": {
+    "diala-tica-da-dependaancia-ruy-mauro-marini-revista-barra-vento-2-0": {
       "views": 1,
       "pdf_downloads": 0,
-      "updated_at": "2026-03-22T17:26:22"
-    },
-    "arte-pela-arte-lukacs-traducao-revisao-mt": {
-      "views": 2,
-      "pdf_downloads": 0,
-      "updated_at": "2026-03-27T20:37:49"
+      "updated_at": "2026-03-30T16:31:05",
+      "daily": {
+        "2026-03-30": {
+          "views": 1,
+          "pdf_downloads": 0
+        }
+      },
+      "locations": {
+        "Local|Rede local|Desenvolvimento": 1
+      },
+      "daily_locations": {
+        "2026-03-30": {
+          "Local|Rede local|Desenvolvimento": 1
+        }
+      }
     }
   }
 }

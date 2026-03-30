@@ -39,6 +39,7 @@ INPUT_DIR = ROOT / "conteudo" / "entrada-docx"
 PROCESSED_DIR = ROOT / "conteudo" / "processados"
 UPLOADS_DIR = SITE_DIR / "uploads"
 BACKUPS_DIR = ROOT / "dados" / "backups"
+STATS_FILE = ROOT / "dados" / "estatisticas.json"
 TEXT_BACKUP_ARCHIVE = BACKUPS_DIR / "textos-publicados.zip"
 
 WORD_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
@@ -586,6 +587,35 @@ def load_sidecar_metadata(path: Path) -> dict[str, object]:
         return normalize_loaded_value(json.loads(sidecar_file.read_text(encoding="utf-8")))
     except json.JSONDecodeError:
         return {}
+
+
+def load_monthly_read_counts(target_month: str | None = None) -> dict[str, int]:
+    month_key = target_month or datetime.now().strftime("%Y-%m")
+    if not STATS_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(STATS_FILE.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+    source = raw.get("articles", {}) if isinstance(raw, dict) else {}
+    if not isinstance(source, dict):
+        return {}
+
+    counts: dict[str, int] = {}
+    for slug, entry in source.items():
+        if not isinstance(entry, dict):
+            continue
+        total = 0
+        daily = entry.get("daily", {})
+        if isinstance(daily, dict):
+            for day_key, day_entry in daily.items():
+                if not str(day_key).startswith(month_key):
+                    continue
+                if isinstance(day_entry, dict):
+                    total += int(day_entry.get("views", 0) or 0)
+        counts[str(slug)] = total
+    return counts
 
 
 def resolve_image(sidecar_data: dict[str, object], fallback_title: str) -> tuple[str, str, str, str]:
@@ -1255,7 +1285,6 @@ def render_most_read_item(article: Article) -> str:
               <a class="most-read__link" href="{article_href(article, '')}">{escape(article.title)}</a>
               <span class="most-read__meta">
                 <span>{format_long_date(article.published_at)}</span>
-                <span data-most-read-count>0 leituras no mes</span>
               </span>
             </li>"""
 
@@ -1523,6 +1552,14 @@ def create_article_pdf(article: Article) -> None:
 
 def render_home_page(articles: list[Article]) -> str:
     today = format_long_date(datetime.now())
+    monthly_read_counts = load_monthly_read_counts()
+    most_read_articles = sorted(
+        articles,
+        key=lambda article: (
+            -int(monthly_read_counts.get(article.slug, 0) or 0),
+            -article.published_at.timestamp(),
+        ),
+    )
     category_sections = "\n".join(
         render_home_category_panel(
             category,
@@ -1532,44 +1569,10 @@ def render_home_page(articles: list[Article]) -> str:
     )
 
     featured_html = render_featured_carousel(articles)
-    most_read_html = render_most_read_sidebar(articles)
+    most_read_html = render_most_read_sidebar(most_read_articles)
     home_script = """
       <script>
         (() => {
-          const storageKey = "barravento-read-counts-monthly";
-          const list = document.querySelector("[data-most-read-list]");
-          let counts = {};
-          if (list && window.BarraventoConsent && window.BarraventoConsent.hasPerformanceConsent()) {
-            try {
-              const monthly = JSON.parse(localStorage.getItem(storageKey) || "{}");
-              const monthKey = new Date().toISOString().slice(0, 7);
-              counts = monthly && typeof monthly === "object" ? (monthly[monthKey] || {}) : {};
-            } catch (error) {
-              counts = {};
-            }
-
-            const pluralize = (value) => value === 1 ? "1 leitura no mes" : value + " leituras no mes";
-            const items = Array.from(list.querySelectorAll("[data-most-read-item]")).map((item, index) => ({ item, index }));
-            items.sort((left, right) => {
-              const leftCount = Number(counts[left.item.dataset.slug] || 0);
-              const rightCount = Number(counts[right.item.dataset.slug] || 0);
-              if (leftCount !== rightCount) {
-                return rightCount - leftCount;
-              }
-              return left.index - right.index;
-            });
-
-            const target = list.querySelector(".most-read__list");
-            items.forEach(({ item }) => {
-              const count = Number(counts[item.dataset.slug] || 0);
-              const countNode = item.querySelector("[data-most-read-count]");
-              if (countNode) {
-                countNode.textContent = pluralize(count);
-              }
-              target.appendChild(item);
-            });
-          }
-
           const carousel = document.querySelector("[data-feature-carousel]");
           if (!carousel) {
             return;
@@ -1942,15 +1945,15 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               <p>Use este bloco para criar uma nova pagina no site. O sistema preserva negrito, italico e desloca notas de rodape e referencias bibliograficas para o final.</p>
             </div>
             <form id="create-form" class="upload-form upload-form--editor-layout">
-              <label class="field field--half">
+              <label class="field field--half field--docx-option">
                 <span>Arquivo DOCX</span>
                 <input name="docx" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
               </label>
 
               <input id="create-docx-import-id" name="docx_import_id" type="hidden">
 
-              <div class="upload-actions upload-actions--inline">
-                <button class="button-link button-link--ghost" id="create-import-docx" type="button">Importar DOCX para edicao</button>
+              <div class="upload-actions upload-actions--inline upload-actions--subtle">
+                <button class="button-link button-link--ghost button-link--subtle button-link--tiny" id="create-import-docx" type="button">Importar DOCX para edicao</button>
               </div>
 
               <label class="field field--half">
@@ -1991,6 +1994,29 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               <div class="field field--editor field--full">
                 <span>Corpo do texto</span>
                 <div class="rich-editor">
+                  <div class="rich-editor__meta rich-editor__meta--compact">
+                    <div class="rich-editor__meta-text">
+                      <strong>Editor de criacao</strong>
+                      <span>Importe o DOCX, ajuste o tamanho da fonte e revise o texto final aqui.</span>
+                    </div>
+                    <div class="rich-editor__meta-actions">
+                      <label class="rich-editor__control">
+                        <span>Tamanho da fonte</span>
+                        <select id="create-font-size">
+                          <option value="12px">12 px</option>
+                          <option value="14px">14 px</option>
+                          <option value="16px">16 px</option>
+                          <option value="17px" selected>17 px</option>
+                          <option value="18px">18 px</option>
+                          <option value="20px">20 px</option>
+                          <option value="24px">24 px</option>
+                          <option value="28px">28 px</option>
+                          <option value="32px">32 px</option>
+                          <option value="36px">36 px</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
                   <div id="create-body-editor" class="rich-editor__textarea"></div>
                 </div>
                 <textarea id="create-body" name="body" hidden></textarea>
@@ -2031,7 +2057,32 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               <h3>Dashboard editorial</h3>
               <p>Os numeros abaixo mostram acessos por texto e downloads de PDF por texto, coletados no servidor local.</p>
             </div>
-            <div class="upload-actions">
+            <div class="dashboard-toolbar">
+              <label class="field dashboard-filter">
+                <span>Periodo</span>
+                <select id="dashboard-period">
+                  <option value="7">Ultimos 7 dias</option>
+                  <option value="30" selected>Ultimos 30 dias</option>
+                  <option value="90">Ultimos 90 dias</option>
+                  <option value="365">Ultimos 365 dias</option>
+                  <option value="all">Todo o periodo</option>
+                </select>
+              </label>
+              <label class="field dashboard-filter">
+                <span>Modalidade</span>
+                <select id="dashboard-metric">
+                  <option value="views" selected>Acessos</option>
+                  <option value="locations">Local dos acessos</option>
+                  <option value="pdf_downloads">Download PDF</option>
+                </select>
+              </label>
+              <label class="field dashboard-filter">
+                <span>Grafico</span>
+                <select id="dashboard-chart-kind">
+                  <option value="line" selected>Linha</option>
+                  <option value="pie">Pizza</option>
+                </select>
+              </label>
               <button class="button-link button-link--ghost" id="dashboard-refresh" type="button">Atualizar dashboard</button>
             </div>
             <div class="upload-status" id="dashboard-status" role="status" aria-live="polite"></div>
@@ -2044,28 +2095,20 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               <p>Selecione um texto existente. O arquivo novo ou a imagem nova substituem os anteriores, voce pode editar o corpo e tambem excluir o texto pelo painel.</p>
             </div>
             <form id="edit-form" class="upload-form upload-form--editor-layout">
-              <label class="field field--half">
+              <div class="field field--half field--edit-target">
                 <span>Texto existente</span>
-                <select id="edit-slug" name="slug" required>
-                  <option value="">Escolha um texto</option>
-                </select>
-              </label>
+                <div class="field-inline-actions">
+                  <select id="edit-slug" name="slug" required>
+                    <option value="">Escolha um texto</option>
+                  </select>
+                  <button class="button-link button-link--ghost button-link--danger button-link--tiny" id="delete-article-button" type="button">Excluir</button>
+                </div>
+              </div>
 
               <label class="field field--half">
                 <span>Titulo</span>
                 <input id="edit-title" name="title" type="text" required>
               </label>
-
-              <label class="field field--half">
-                <span>Novo DOCX</span>
-                <input name="docx" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
-              </label>
-
-              <input id="edit-docx-import-id" name="docx_import_id" type="hidden">
-
-              <div class="upload-actions upload-actions--inline">
-                <button class="button-link button-link--ghost" id="edit-import-docx" type="button">Importar novo DOCX para edicao</button>
-              </div>
 
               <label class="field field--half">
                 <span>Nova imagem</span>
@@ -2097,6 +2140,17 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
                 <input id="edit-hashtags" name="hashtags" type="text">
               </label>
 
+              <label class="field field--half field--docx-option">
+                <span>Novo DOCX</span>
+                <input name="docx" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+              </label>
+
+              <input id="edit-docx-import-id" name="docx_import_id" type="hidden">
+
+              <div class="upload-actions upload-actions--inline upload-actions--subtle">
+                <button class="button-link button-link--ghost button-link--subtle" id="edit-import-docx" type="button">Importar novo DOCX para edicao</button>
+              </div>
+
               <div class="field field--editor field--full">
                 <span>Corpo do texto</span>
                 <div class="editor-workspace">
@@ -2107,6 +2161,21 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
                         <span>Negrito, fontes, cores, alinhamento, tabelas, codigo, links, listas e visualizacao.</span>
                       </div>
                       <div class="rich-editor__meta-actions">
+                        <label class="rich-editor__control">
+                          <span>Tamanho da fonte</span>
+                          <select id="edit-font-size">
+                            <option value="12px">12 px</option>
+                            <option value="14px">14 px</option>
+                            <option value="16px">16 px</option>
+                            <option value="17px" selected>17 px</option>
+                            <option value="18px">18 px</option>
+                            <option value="20px">20 px</option>
+                            <option value="24px">24 px</option>
+                            <option value="28px">28 px</option>
+                            <option value="32px">32 px</option>
+                            <option value="36px">36 px</option>
+                          </select>
+                        </label>
                         <label class="rich-editor__switch">
                           <input id="editor-spellcheck-toggle" type="checkbox" checked>
                           <span>Corretor ortografico</span>
@@ -2125,7 +2194,6 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
                   <aside class="editor-insights">
                     <div class="editor-insights__tabs">
                       <button class="is-active" type="button">Resumo</button>
-                      <button type="button" disabled>Dados detalhados</button>
                     </div>
                     <div class="editor-insights__section">
                       <span class="editor-insights__eyebrow">Panorama</span>
@@ -2166,7 +2234,6 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
 
               <div class="upload-actions">
                 <button class="button-link" type="submit">Salvar edicao</button>
-                <button class="button-link button-link--ghost button-link--danger" id="delete-article-button" type="button">Excluir texto</button>
               </div>
               <div class="upload-status" id="edit-status" role="status" aria-live="polite"></div>
             </form>
@@ -2282,6 +2349,9 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
           const deleteArticleButton = document.getElementById("delete-article-button");
           const logoutButton = document.getElementById("logout-button");
           const dashboardRefresh = document.getElementById("dashboard-refresh");
+          const dashboardPeriod = document.getElementById("dashboard-period");
+          const dashboardChartKind = document.getElementById("dashboard-chart-kind");
+          const dashboardMetric = document.getElementById("dashboard-metric");
           const approvalsRefresh = document.getElementById("approvals-refresh");
           const memberLock = document.getElementById("member-lock");
           const memberPanel = document.getElementById("member-panel");
@@ -2290,6 +2360,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
           const memberTabs = Array.from(document.querySelectorAll("[data-member-tab]"));
           const memberTabPanels = Array.from(document.querySelectorAll("[data-member-tab-panel]"));
           const approvalsTabButton = document.getElementById("approvals-tab-button");
+          const membersTabButton = document.querySelector('[data-member-tab="members"]');
           const noticeList = document.getElementById("notice-list");
           const dashboardList = document.getElementById("dashboard-list");
           const registrationApprovals = document.getElementById("registration-approvals");
@@ -2305,12 +2376,24 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
           const memberAuthEntry = document.getElementById("member-auth-entry");
           const loginPageHref = {json.dumps(links["members_login"])};
           const panelPageHref = {json.dumps(links["members_panel"])};
+          const popupStatusNodes = [
+            loginStatus,
+            registerStatus,
+            noticeStatus,
+            dashboardStatus,
+            approvalsStatus,
+            memberStatus,
+            createStatus,
+            editStatus
+          ].filter(Boolean);
           let editorReady = null;
           let pendingEditorHtml = "";
           let createEditorReady = null;
           let pendingCreateEditorHtml = "";
           let member = null;
+          let dashboardPayload = null;
           let editSnapshot = null;
+          let toastHost = null;
 
           function escapeHtml(value) {{
             return String(value).replace(/[&<>"']/g, (char) => {{
@@ -2350,15 +2433,56 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             return value;
           }}
 
+          function getToastHost() {{
+            if (toastHost && document.body.contains(toastHost)) {{
+              return toastHost;
+            }}
+            toastHost = document.createElement("div");
+            toastHost.className = "member-toast-host";
+            toastHost.setAttribute("aria-live", "polite");
+            toastHost.setAttribute("aria-atomic", "false");
+            document.body.appendChild(toastHost);
+            return toastHost;
+          }}
+
+          function showToast(kind, html) {{
+            const host = getToastHost();
+            const toast = document.createElement("article");
+            toast.className = "member-toast member-toast--" + kind;
+            toast.innerHTML = '<div class="member-toast__body">' + html + '</div><button class="member-toast__close" type="button" aria-label="Fechar notificacao">Fechar</button>';
+            host.appendChild(toast);
+            const close = () => {{
+              toast.classList.add("is-leaving");
+              window.setTimeout(() => {{
+                if (toast.parentNode) {{
+                  toast.parentNode.removeChild(toast);
+                }}
+              }}, 220);
+            }};
+            const closeButton = toast.querySelector(".member-toast__close");
+            if (closeButton) {{
+              closeButton.addEventListener("click", close);
+            }}
+            const timeout = kind === "error" ? 5200 : (kind === "pending" ? 2400 : 3600);
+            window.setTimeout(close, timeout);
+          }}
+
           function setStatus(node, kind, html) {{
             node.className = "upload-status is-" + kind;
             node.innerHTML = html;
+            if (node && node.dataset && node.dataset.popupStatus === "true" && html) {{
+              showToast(kind, html);
+            }}
           }}
 
           function clearStatus(node) {{
             node.className = "upload-status";
             node.innerHTML = "";
           }}
+
+          popupStatusNodes.forEach((node) => {{
+            node.dataset.popupStatus = "true";
+          }});
 
           function normalizeInlineText(value) {{
             return repairText(String(value || "").replace(/\\u00a0/g, " ")).replace(/[ \\t]+/g, " ").trim();
@@ -2407,6 +2531,87 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             return nodes.map((node) => sanitizeInlineNode(node)).join("");
           }}
 
+          function sanitizeInlineStyleValue(value) {{
+            const allowed = [];
+            String(value || "").split(";").forEach((chunk) => {{
+              const [rawName, ...rawRest] = chunk.split(":");
+              const name = String(rawName || "").trim().toLowerCase();
+              const input = rawRest.join(":").trim();
+              if (!name || !input) {{
+                return;
+              }}
+              if (name === "text-align") {{
+                const normalized = input.toLowerCase();
+                if (["left", "center", "right", "justify"].includes(normalized)) {{
+                  allowed.push(name + ":" + normalized);
+                }}
+                return;
+              }}
+              if (name === "color" || name === "background-color") {{
+                if (/^(#[0-9a-f]{{3,8}}|rgba?\\([^)]*\\)|hsla?\\([^)]*\\)|[a-z-]+)$/i.test(input)) {{
+                  allowed.push(name + ":" + input);
+                }}
+                return;
+              }}
+              if (name === "font-size") {{
+                if (/^([0-9]{{1,3}}(\\.[0-9]+)?)(px|pt|em|rem|%)$/i.test(input) || /^(xx-small|x-small|small|medium|large|x-large|xx-large)$/i.test(input)) {{
+                  allowed.push(name + ":" + input);
+                }}
+                return;
+              }}
+              if (name === "font-family") {{
+                const safeFamily = input.replace(/[^a-z0-9,\\- "'_]/gi, "").trim();
+                if (safeFamily) {{
+                  allowed.push(name + ":" + safeFamily);
+                }}
+                return;
+              }}
+              if (name === "font-weight") {{
+                if (/^(normal|bold|bolder|lighter|[1-9]00)$/i.test(input)) {{
+                  allowed.push(name + ":" + input.toLowerCase());
+                }}
+                return;
+              }}
+              if (name === "font-style") {{
+                if (/^(normal|italic|oblique)$/i.test(input)) {{
+                  allowed.push(name + ":" + input.toLowerCase());
+                }}
+                return;
+              }}
+              if (name === "text-decoration") {{
+                const normalized = input.toLowerCase().replace(/\\s+/g, " ").trim();
+                if (/^(none|underline|line-through|underline line-through|line-through underline)$/.test(normalized)) {{
+                  allowed.push(name + ":" + normalized);
+                }}
+                return;
+              }}
+              if (name === "line-height") {{
+                if (/^([0-9]+(\\.[0-9]+)?)(px|pt|em|rem|%)?$/i.test(input) || /^(normal)$/i.test(input)) {{
+                  allowed.push(name + ":" + input);
+                }}
+                return;
+              }}
+              if (name === "letter-spacing") {{
+                if (/^-?([0-9]+(\\.[0-9]+)?)(px|pt|em|rem)$/i.test(input) || /^(normal)$/i.test(input)) {{
+                  allowed.push(name + ":" + input);
+                }}
+                return;
+              }}
+              if (name === "white-space") {{
+                if (/^(normal|pre|pre-wrap|pre-line|nowrap)$/i.test(input)) {{
+                  allowed.push(name + ":" + input.toLowerCase());
+                }}
+                return;
+              }}
+              if (name === "margin-left" || name === "padding-left" || name === "text-indent") {{
+                if (/^-?([0-9]+(\\.[0-9]+)?)(px|pt|em|rem|%)$/i.test(input)) {{
+                  allowed.push(name + ":" + input);
+                }}
+              }}
+            }});
+            return allowed.join("; ");
+          }}
+
           function sanitizeInlineNode(node) {{
             if (node.nodeType === Node.TEXT_NODE) {{
               return escapeHtml(node.textContent || "");
@@ -2419,7 +2624,9 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               return "<br>";
             }}
             if (["strong", "b", "em", "i", "u", "sup", "sub", "s", "span", "code"].includes(tag)) {{
-              return "<" + tag + ">" + sanitizeInlineNodes(Array.from(node.childNodes)) + "</" + tag + ">";
+              const style = sanitizeInlineStyleValue(node.getAttribute("style") || "");
+              const attrs = style ? ' style="' + escapeHtml(style) + '"' : "";
+              return "<" + tag + attrs + ">" + sanitizeInlineNodes(Array.from(node.childNodes)) + "</" + tag + ">";
             }}
             if (tag === "a") {{
               const href = sanitizeUrl(node.getAttribute("href") || node.textContent || "");
@@ -2666,6 +2873,20 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
 
           function getCreateEditorInstance() {{
             return window.barraventoCreateEditor || null;
+          }}
+
+          function registerRichEditorFormats() {{
+            if (!window.Quill || window.__barraventoQuillFormatsRegistered) {{
+              return;
+            }}
+            const sizeStyle = window.Quill.import("attributors/style/size");
+            const fontStyle = window.Quill.import("attributors/style/font");
+            const alignStyle = window.Quill.import("attributors/style/align");
+            sizeStyle.whitelist = ["12px", "14px", "16px", "17px", "18px", "20px", "24px", "28px", "32px", "36px"];
+            window.Quill.register(sizeStyle, true);
+            window.Quill.register(fontStyle, true);
+            window.Quill.register(alignStyle, true);
+            window.__barraventoQuillFormatsRegistered = true;
           }}
 
           function getEditorHtml() {{
@@ -2968,6 +3189,29 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             window.setTimeout(() => URL.revokeObjectURL(href), 150);
           }}
 
+          function bindFontSizeControl(editor, select) {{
+            if (!editor || !select) {{
+              return;
+            }}
+            const sync = (range) => {{
+              const activeRange = range || (typeof editor.getSelection === "function" ? editor.getSelection() : null);
+              const format = typeof editor.getFormat === "function" ? editor.getFormat(activeRange || undefined) : {{}};
+              const current = String(format.size || "").trim();
+              if (current && Array.from(select.options).some((option) => option.value === current)) {{
+                select.value = current;
+              }} else {{
+                select.value = "17px";
+              }}
+            }};
+            select.addEventListener("change", () => {{
+              const value = String(select.value || "").trim() || "17px";
+              editor.format("size", value, "user");
+            }});
+            editor.on("selection-change", (range) => sync(range));
+            editor.on("text-change", () => sync());
+            sync();
+          }}
+
           function activateRichEditor() {{
             if (!editBodyEditor || !window.Quill) {{
               return Promise.resolve();
@@ -2982,9 +3226,10 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (editorToolbar) {{
               editorToolbar.remove();
             }}
+            registerRichEditorFormats();
             const toolbarOptions = [
               [{{ header: [1, 2, 3, false] }}],
-              [{{ font: [] }}, {{ size: ["small", false, "large", "huge"] }}],
+              [{{ font: [] }}],
               ["bold", "italic", "underline", "strike"],
               [{{ script: "sub" }}, {{ script: "super" }}],
               [{{ color: [] }}, {{ background: [] }}],
@@ -2997,6 +3242,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             const quill = new window.Quill(editBodyEditor, {{
               theme: "snow",
               placeholder: "Escreva o texto aqui com a mesma liberdade de um editor completo.",
+              formats: ["header", "font", "size", "bold", "italic", "underline", "strike", "script", "color", "background", "align", "list", "indent", "blockquote", "code-block", "link", "image", "video"],
               modules: {{
                 toolbar: toolbarOptions,
                 history: {{
@@ -3011,6 +3257,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (pendingEditorHtml) {{
               applyHtmlToQuill(quill, pendingEditorHtml);
             }}
+            bindFontSizeControl(quill, document.getElementById("edit-font-size"));
             quill.on("text-change", () => {{
               syncEditBodyFields();
               clearStatus(editStatus);
@@ -3067,9 +3314,10 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (createEditorReady) {{
               return createEditorReady;
             }}
+            registerRichEditorFormats();
             const toolbarOptions = [
               [{{ header: [1, 2, 3, false] }}],
-              [{{ font: [] }}, {{ size: ["small", false, "large", "huge"] }}],
+              [{{ font: [] }}],
               ["bold", "italic", "underline", "strike"],
               [{{ script: "sub" }}, {{ script: "super" }}],
               [{{ color: [] }}, {{ background: [] }}],
@@ -3082,6 +3330,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             const quill = new window.Quill(createBodyEditor, {{
               theme: "snow",
               placeholder: "Importe o DOCX e revise o texto aqui antes de publicar.",
+              formats: ["header", "font", "size", "bold", "italic", "underline", "strike", "script", "color", "background", "align", "list", "indent", "blockquote", "code-block", "link", "image", "video"],
               modules: {{
                 toolbar: toolbarOptions,
                 history: {{
@@ -3096,6 +3345,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (pendingCreateEditorHtml) {{
               applyHtmlToQuill(quill, pendingCreateEditorHtml);
             }}
+            bindFontSizeControl(quill, document.getElementById("create-font-size"));
             quill.on("text-change", () => {{
               syncCreateBodyFields();
               clearStatus(createStatus);
@@ -3142,6 +3392,36 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             return "Inclusao pendente";
           }}
 
+          function submissionApprovalVariant(kind) {{
+            if (kind === "edit") {{
+              return "edit";
+            }}
+            if (kind === "delete") {{
+              return "delete";
+            }}
+            return "create";
+          }}
+
+          function submissionApproveLabel(kind) {{
+            if (kind === "edit") {{
+              return "Aprovar edicao";
+            }}
+            if (kind === "delete") {{
+              return "Aprovar exclusao";
+            }}
+            return "Aprovar inclusao";
+          }}
+
+          function submissionRejectLabel(kind) {{
+            if (kind === "edit") {{
+              return "Recusar edicao";
+            }}
+            if (kind === "delete") {{
+              return "Recusar exclusao";
+            }}
+            return "Recusar inclusao";
+          }}
+
           function renderNotice(item) {{
             const variant = ["success", "danger"].includes(String(item.variant || "").trim()) ? String(item.variant).trim() : "neutral";
             const metaLabel = item.scope === "private" ? "Retorno do Conselho Editorial" : (item.author_name || "Membro");
@@ -3158,12 +3438,30 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             );
           }}
 
-          function renderDashboard(items) {{
+          function renderDashboard(payload) {{
+            const items = payload && Array.isArray(payload.items) ? payload.items : [];
+            const totals = payload && payload.totals ? payload.totals : {{ views: 0, pdf_downloads: 0 }};
+            const series = payload && Array.isArray(payload.series) ? payload.series : [];
+            const locations = payload && Array.isArray(payload.locations) ? payload.locations : [];
+            const periodLabel = payload && payload.period ? String(payload.period.label || "") : "Periodo atual";
+            const metric = dashboardMetric ? String(dashboardMetric.value || "views") : "views";
+            const chartKind = dashboardChartKind ? String(dashboardChartKind.value || "line") : "line";
             if (!items.length) {{
               dashboardList.innerHTML = '<div class="empty-state"><h3>Sem estatisticas ainda</h3><p>Os acessos e downloads vao aparecer aqui conforme o site for usado pelo servidor local.</p></div>';
               return;
             }}
+            const metricLabel = metric === "pdf_downloads" ? "Downloads de PDF" : (metric === "locations" ? "Local dos acessos" : "Acessos");
+            const metricValue = metric === "pdf_downloads" ? Number(totals.pdf_downloads || 0) : (metric === "locations" ? locations.length : Number(totals.views || 0));
+            const activeChart = chartKind === "pie"
+              ? renderDashboardPieChart(items, locations, metric)
+              : renderDashboardLineChart(items, series, locations, metric);
             dashboardList.innerHTML = (
+              '<div class="dashboard-summary">' +
+                '<article class="dashboard-kpi"><strong>' + escapeHtml(periodLabel) + '</strong><span>' + escapeHtml(String(totals.views || 0)) + ' acessos</span></article>' +
+                '<article class="dashboard-kpi"><strong>Downloads de PDF</strong><span>' + escapeHtml(String(totals.pdf_downloads || 0)) + ' downloads</span></article>' +
+                '<article class="dashboard-kpi"><strong>' + escapeHtml(metricLabel) + '</strong><span>' + escapeHtml(String(metricValue || 0)) + (metric === "locations" ? ' locais' : ' no periodo') + '</span></article>' +
+              '</div>' +
+              '<section class="dashboard-chart-card dashboard-chart-card--solo"><div class="dashboard-chart-card__head"><h4>Grafico de ' + escapeHtml(chartKind === "pie" ? "pizza" : "linha") + '</h4><p>' + escapeHtml(metricLabel) + ' no periodo selecionado.</p></div>' + activeChart + '</section>' +
               '<div class="dashboard-table">' +
                 '<div class="dashboard-row dashboard-row--head">' +
                   '<span>Texto</span><span>Acessos</span><span>PDFs</span><span>Publicacao</span>' +
@@ -3178,6 +3476,170 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
                     '</div>'
                   );
                 }}).join('') +
+              '</div>'
+            );
+          }}
+
+          function renderDashboardLineChart(items, series, locations, metric) {{
+            if (metric === "locations") {{
+              if (!locations.length) {{
+                return '<div class="empty-state empty-state--compact"><h3>Sem localidade suficiente</h3><p>Quando houver acessos com localidade resolvida, os locais mais recorrentes aparecerao aqui.</p></div>';
+              }}
+              const width = 420;
+              const height = 170;
+              const padding = 20;
+              const maxValue = Math.max(1, ...locations.map((item) => Number(item.value || 0)));
+              const usableWidth = width - padding * 2;
+              const usableHeight = height - padding * 2;
+              const step = locations.length > 1 ? usableWidth / (locations.length - 1) : 0;
+              const pathFor = locations.map((item, index) => {{
+                const x = padding + (step * index);
+                const y = height - padding - ((Number(item.value || 0) / maxValue) * usableHeight);
+                return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
+              }}).join(' ');
+              const labels = locations.map((item) => '<span>' + escapeHtml(String(item.label || '').length > 18 ? String(item.label || '').slice(0, 18) + '...' : String(item.label || '')) + '</span>').join('');
+              const legend = locations.map((item) => '<li><i class="dashboard-swatch dashboard-swatch--views"></i><span>' + escapeHtml(item.label || '') + '</span><strong>' + escapeHtml(String(item.value || 0)) + '</strong></li>').join('');
+              return (
+                '<div class="dashboard-line-chart dashboard-line-chart--compact">' +
+                  '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Grafico de linha de acessos por localidade">' +
+                    '<path class="dashboard-line-chart__grid" d="M' + padding + ' ' + (height - padding) + ' H' + (width - padding) + '"></path>' +
+                    '<path class="dashboard-line-chart__path dashboard-line-chart__path--views" d="' + pathFor + '"></path>' +
+                  '</svg>' +
+                  '<div class="dashboard-line-chart__legend"><span><i class="dashboard-swatch dashboard-swatch--views"></i>Locais com mais acessos</span></div>' +
+                  '<div class="dashboard-line-chart__labels">' + labels + '</div>' +
+                  '<ul class="dashboard-pie-chart__legend dashboard-pie-chart__legend--chart">' + legend + '</ul>' +
+                '</div>'
+              );
+            }}
+            if (!series.length) {{
+              return '<div class="empty-state empty-state--compact"><h3>Sem historico suficiente</h3><p>Os pontos diarios vao aparecer aqui conforme o site for usado.</p></div>';
+            }}
+            const width = 420;
+            const height = 170;
+            const padding = 24;
+            const key = metric === "pdf_downloads" ? "pdf_downloads" : "views";
+            const values = series.map((item) => Number(item[key] || 0));
+            const maxValue = Math.max(1, ...values);
+            const usableWidth = width - padding * 2;
+            const usableHeight = height - padding * 2;
+            const step = series.length > 1 ? usableWidth / (series.length - 1) : 0;
+            const pathFor = series.map((item, index) => {{
+              const x = padding + (step * index);
+              const y = height - padding - ((Number(item[key] || 0) / maxValue) * usableHeight);
+              return (index === 0 ? 'M' : 'L') + x.toFixed(2) + ' ' + y.toFixed(2);
+            }}).join(' ');
+            const labels = [series[0], series[Math.floor((series.length - 1) / 2)], series[series.length - 1]]
+              .filter(Boolean)
+              .map((item) => '<span>' + escapeHtml(formatDateTime(String(item.label || '') + 'T12:00:00')) + '</span>')
+              .filter((value, index, list) => list.indexOf(value) === index)
+              .join('');
+            const detailLegend = metric === "pdf_downloads"
+              ? (() => {{
+                  const topItems = items
+                    .map((item) => ({{
+                      label: String(item.title || "").trim(),
+                      value: Number(item.pdf_downloads || 0)
+                    }}))
+                    .filter((item) => item.value > 0)
+                    .sort((left, right) => right.value - left.value)
+                    .slice(0, 5);
+                  if (!topItems.length) {{
+                    return '';
+                  }}
+                  return '<ul class="dashboard-pie-chart__legend dashboard-pie-chart__legend--chart">' + topItems.map((item) => '<li><i class="dashboard-swatch dashboard-swatch--pdfs"></i><span>' + escapeHtml(item.label) + '</span><strong>' + escapeHtml(String(item.value)) + '</strong></li>').join('') + '</ul>';
+                }})()
+              : '';
+            return (
+              '<div class="dashboard-line-chart dashboard-line-chart--compact">' +
+                '<svg viewBox="0 0 ' + width + ' ' + height + '" role="img" aria-label="Grafico de linha do dashboard">' +
+                  '<path class="dashboard-line-chart__grid" d="M' + padding + ' ' + (height - padding) + ' H' + (width - padding) + '"></path>' +
+                  '<path class="dashboard-line-chart__path ' + (metric === "pdf_downloads" ? 'dashboard-line-chart__path--pdfs' : 'dashboard-line-chart__path--views') + '" d="' + pathFor + '"></path>' +
+                '</svg>' +
+                '<div class="dashboard-line-chart__legend"><span><i class="dashboard-swatch ' + (metric === "pdf_downloads" ? 'dashboard-swatch--pdfs' : 'dashboard-swatch--views') + '"></i>' + escapeHtml(metric === "pdf_downloads" ? "Downloads de PDF" : "Acessos") + '</span></div>' +
+                '<div class="dashboard-line-chart__labels">' + labels + '</div>' +
+                detailLegend +
+              '</div>'
+            );
+          }}
+
+          function renderDashboardPieChart(items, locations, metric) {{
+            if (metric === "locations") {{
+              if (!locations.length) {{
+                return '<div class="empty-state empty-state--compact"><h3>Sem localidade suficiente</h3><p>Quando houver acessos com localidade resolvida, a distribuicao por cidade aparecera aqui.</p></div>';
+              }}
+              const colors = ['#8d2f23', '#c96a2f', '#d8a24e', '#6d8a77', '#3c5f79'];
+              const total = locations.reduce((sum, item) => sum + Number(item.value || 0), 0) || 1;
+              let angle = -Math.PI / 2;
+              const radius = 82;
+              const center = 100;
+              const slices = locations.map((item, index) => {{
+                const portion = Number(item.value || 0) / total;
+                const nextAngle = angle + (Math.PI * 2 * portion);
+                const x1 = center + radius * Math.cos(angle);
+                const y1 = center + radius * Math.sin(angle);
+                const x2 = center + radius * Math.cos(nextAngle);
+                const y2 = center + radius * Math.sin(nextAngle);
+                const largeArc = portion > 0.5 ? 1 : 0;
+                const path = 'M ' + center + ' ' + center + ' L ' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' A ' + radius + ' ' + radius + ' 0 ' + largeArc + ' 1 ' + x2.toFixed(2) + ' ' + y2.toFixed(2) + ' Z';
+                angle = nextAngle;
+                return {{ path, color: colors[index % colors.length], label: item.label, value: item.value }};
+              }});
+              return (
+                '<div class="dashboard-pie-chart">' +
+                  '<svg viewBox="0 0 200 200" role="img" aria-label="Grafico de pizza por localidade">' +
+                    slices.map((slice) => '<path d="' + slice.path + '" fill="' + slice.color + '"></path>').join('') +
+                  '</svg>' +
+                  '<ul class="dashboard-pie-chart__legend">' +
+                    slices.map((slice) => '<li><i class="dashboard-swatch" style="background:' + slice.color + '"></i><span>' + escapeHtml(slice.label || '') + '</span><strong>' + escapeHtml(String(slice.value || 0)) + '</strong></li>').join('') +
+                  '</ul>' +
+                '</div>'
+              );
+            }}
+            if (!items.length) {{
+              return '<div class="empty-state empty-state--compact"><h3>Sem distribuicao ainda</h3><p>Quando houver acessos no periodo, o grafico aparecera aqui.</p></div>';
+            }}
+            const colors = ['#8d2f23', '#c96a2f', '#d8a24e', '#6d8a77', '#3c5f79'];
+            const key = metric === "pdf_downloads" ? "pdf_downloads" : "views";
+            const topItems = items
+              .map((item) => ({{
+                label: item.title,
+                value: Number(item[key] || 0)
+              }}))
+              .filter((item) => item.value > 0)
+              .sort((left, right) => right.value - left.value)
+              .slice(0, 5);
+            if (!topItems.length) {{
+              return '<div class="empty-state empty-state--compact"><h3>Sem distribuicao ainda</h3><p>Quando houver dados nesta modalidade, o grafico aparecera aqui.</p></div>';
+            }}
+            const total = topItems.reduce((sum, item) => sum + Number(item.value || 0), 0) || 1;
+            let angle = -Math.PI / 2;
+            const radius = 82;
+            const center = 100;
+            const slices = topItems.map((item, index) => {{
+              const portion = Number(item.value || 0) / total;
+              const nextAngle = angle + (Math.PI * 2 * portion);
+              const x1 = center + radius * Math.cos(angle);
+              const y1 = center + radius * Math.sin(angle);
+              const x2 = center + radius * Math.cos(nextAngle);
+              const y2 = center + radius * Math.sin(nextAngle);
+              const largeArc = portion > 0.5 ? 1 : 0;
+              const path = 'M ' + center + ' ' + center + ' L ' + x1.toFixed(2) + ' ' + y1.toFixed(2) + ' A ' + radius + ' ' + radius + ' 0 ' + largeArc + ' 1 ' + x2.toFixed(2) + ' ' + y2.toFixed(2) + ' Z';
+              angle = nextAngle;
+              return {{
+                path,
+                color: colors[index % colors.length],
+                label: item.label,
+                value: item.value
+              }};
+            }});
+            return (
+              '<div class="dashboard-pie-chart">' +
+                '<svg viewBox="0 0 200 200" role="img" aria-label="Grafico de pizza do dashboard">' +
+                  slices.map((slice) => '<path d="' + slice.path + '" fill="' + slice.color + '"></path>').join('') +
+                '</svg>' +
+                '<ul class="dashboard-pie-chart__legend">' +
+                  slices.map((slice) => '<li><i class="dashboard-swatch" style="background:' + slice.color + '"></i><span>' + escapeHtml(slice.label || '') + '</span><strong>' + escapeHtml(String(slice.value || 0)) + '</strong></li>').join('') +
+                '</ul>' +
               '</div>'
             );
           }}
@@ -3213,11 +3675,13 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
           function renderSubmissionApproval(item) {{
             const author = item.requested_by || {{}};
             const previewUrl = String(item.preview_url || "").trim();
+            const kind = String(item.kind || "").trim();
+            const variant = submissionApprovalVariant(kind);
             return (
-              '<article class="approval-card">' +
+              '<article class="approval-card approval-card--' + escapeHtml(variant) + '">' +
                 '<div class="approval-card__header">' +
                   '<div>' +
-                    '<span class="approval-card__eyebrow">' + escapeHtml(submissionKindLabel(item.kind)) + '</span>' +
+                    '<span class="approval-card__eyebrow">' + escapeHtml(submissionKindLabel(kind)) + '</span>' +
                     '<h4>' + escapeHtml(item.title || item.slug || "Solicitacao") + '</h4>' +
                   '</div>' +
                   '<span class="approval-card__stamp">' + formatDateTime(item.requested_at || "") + '</span>' +
@@ -3232,8 +3696,8 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
                 '</label>' +
                 '<div class="approval-card__actions">' +
                   (previewUrl ? '<a class="button-link button-link--ghost approval-action" href="' + escapeHtml(previewUrl) + '" target="_blank" rel="noopener noreferrer">Ver previa</a>' : '') +
-                  '<button class="button-link approval-action" type="button" data-approve-submission="' + escapeHtml(item.id || "") + '">Aprovar publicacao</button>' +
-                  '<button class="button-link button-link--ghost button-link--danger approval-action" type="button" data-reject-submission="' + escapeHtml(item.id || "") + '">Recusar</button>' +
+                  '<button class="button-link approval-action" type="button" data-approve-submission="' + escapeHtml(item.id || "") + '">' + escapeHtml(submissionApproveLabel(kind)) + '</button>' +
+                  '<button class="button-link button-link--ghost button-link--danger approval-action" type="button" data-reject-submission="' + escapeHtml(item.id || "") + '">' + escapeHtml(submissionRejectLabel(kind)) + '</button>' +
                 '</div>' +
               '</article>'
             );
@@ -3251,6 +3715,9 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (authenticated) {{
               memberSummary.innerHTML = "Conectado como <strong>" + escapeHtml(member.name || member.email || "Membro") + "</strong><br>" + escapeHtml(member.email || "") + "<br>" + escapeHtml(member.role_label || "");
               approvalsTabButton.hidden = member.role !== "admin";
+              if (membersTabButton) {{
+                membersTabButton.hidden = member.role !== "admin";
+              }}
               setActiveTab("upload");
               clearStatus(memberStatus);
               window.setTimeout(scrollToMemberPanel, 80);
@@ -3261,6 +3728,9 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               registrationApprovals.innerHTML = "";
               submissionApprovals.innerHTML = "";
               approvalsTabButton.hidden = true;
+              if (membersTabButton) {{
+                membersTabButton.hidden = true;
+              }}
               clearStatus(memberStatus);
             }}
           }}
@@ -3411,7 +3881,8 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
               dashboardList.innerHTML = "";
               return;
             }}
-            const response = await fetch("/api/members/dashboard", {{
+            const period = dashboardPeriod ? encodeURIComponent(dashboardPeriod.value || "30") : "30";
+            const response = await fetch("/api/members/dashboard?period=" + period, {{
               credentials: "same-origin"
             }});
             const payload = await readJson(response);
@@ -3422,7 +3893,8 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (!response.ok || !payload.ok) {{
               throw new Error(payload.error || "Nao foi possivel carregar o dashboard.");
             }}
-            renderDashboard(payload.items || []);
+            dashboardPayload = payload;
+            renderDashboard(payload);
           }}
 
           async function loadApprovals() {{
@@ -3643,6 +4115,32 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             }} catch (error) {{
               setStatus(dashboardStatus, "error", escapeHtml(error.message));
             }}
+          }});
+
+          if (dashboardPeriod) {{
+            dashboardPeriod.addEventListener("change", async () => {{
+              if (!requireMember(dashboardStatus)) {{
+                return;
+              }}
+              setStatus(dashboardStatus, "pending", "Atualizando filtro do dashboard...");
+              try {{
+                await loadDashboard();
+                setStatus(dashboardStatus, "success", "Dashboard filtrado.");
+              }} catch (error) {{
+                setStatus(dashboardStatus, "error", escapeHtml(error.message));
+              }}
+            }});
+          }}
+
+          [dashboardChartKind, dashboardMetric].forEach((control) => {{
+            if (!control) {{
+              return;
+            }}
+            control.addEventListener("change", () => {{
+              if (dashboardPayload) {{
+                renderDashboard(dashboardPayload);
+              }}
+            }});
           }});
 
           approvalsRefresh.addEventListener("click", async () => {{
@@ -3876,6 +4374,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
                 }});
                 await loadApprovals();
                 await loadDashboard();
+                window.setTimeout(() => window.location.reload(), 600);
                 setStatus(approvalsStatus, "success", "Publicacao aprovada com sucesso.");
               }} catch (error) {{
                 setStatus(approvalsStatus, "error", escapeHtml(error.message));
@@ -3971,6 +4470,7 @@ def render_member_login_page(*, root_prefix: str = "") -> str:
           const loginForm = document.getElementById("login-form");
           const loginStatus = document.getElementById("login-status");
           const panelPageHref = {json.dumps(links["members_panel"])};
+          let toastHost = null;
 
           function escapeHtml(value) {{
             return String(value).replace(/[&<>"']/g, (char) => {{
@@ -3979,10 +4479,49 @@ def render_member_login_page(*, root_prefix: str = "") -> str:
             }});
           }}
 
+          function getToastHost() {{
+            if (toastHost && document.body.contains(toastHost)) {{
+              return toastHost;
+            }}
+            toastHost = document.createElement("div");
+            toastHost.className = "member-toast-host";
+            toastHost.setAttribute("aria-live", "polite");
+            toastHost.setAttribute("aria-atomic", "false");
+            document.body.appendChild(toastHost);
+            return toastHost;
+          }}
+
+          function showToast(kind, html) {{
+            const host = getToastHost();
+            const toast = document.createElement("article");
+            toast.className = "member-toast member-toast--" + kind;
+            toast.innerHTML = '<div class="member-toast__body">' + html + '</div><button class="member-toast__close" type="button" aria-label="Fechar notificacao">Fechar</button>';
+            host.appendChild(toast);
+            const close = () => {{
+              toast.classList.add("is-leaving");
+              window.setTimeout(() => {{
+                if (toast.parentNode) {{
+                  toast.parentNode.removeChild(toast);
+                }}
+              }}, 220);
+            }};
+            const closeButton = toast.querySelector(".member-toast__close");
+            if (closeButton) {{
+              closeButton.addEventListener("click", close);
+            }}
+            const timeout = kind === "error" ? 5200 : (kind === "pending" ? 2400 : 3600);
+            window.setTimeout(close, timeout);
+          }}
+
           function setStatus(node, kind, html) {{
             node.className = "upload-status is-" + kind;
             node.innerHTML = html;
+            if (node && node.dataset && node.dataset.popupStatus === "true" && html) {{
+              showToast(kind, html);
+            }}
           }}
+
+          loginStatus.dataset.popupStatus = "true";
 
           async function readJson(response) {{
             return response.json().catch(() => ({{}}));

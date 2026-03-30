@@ -233,6 +233,7 @@
           const loginForm = document.getElementById("login-form");
           const loginStatus = document.getElementById("login-status");
           const panelPageHref = "../painel/#member-panel";
+          let toastHost = null;
 
           function escapeHtml(value) {
             return String(value).replace(/[&<>"']/g, (char) => {
@@ -241,10 +242,49 @@
             });
           }
 
+          function getToastHost() {
+            if (toastHost && document.body.contains(toastHost)) {
+              return toastHost;
+            }
+            toastHost = document.createElement("div");
+            toastHost.className = "member-toast-host";
+            toastHost.setAttribute("aria-live", "polite");
+            toastHost.setAttribute("aria-atomic", "false");
+            document.body.appendChild(toastHost);
+            return toastHost;
+          }
+
+          function showToast(kind, html) {
+            const host = getToastHost();
+            const toast = document.createElement("article");
+            toast.className = "member-toast member-toast--" + kind;
+            toast.innerHTML = '<div class="member-toast__body">' + html + '</div><button class="member-toast__close" type="button" aria-label="Fechar notificacao">Fechar</button>';
+            host.appendChild(toast);
+            const close = () => {
+              toast.classList.add("is-leaving");
+              window.setTimeout(() => {
+                if (toast.parentNode) {
+                  toast.parentNode.removeChild(toast);
+                }
+              }, 220);
+            };
+            const closeButton = toast.querySelector(".member-toast__close");
+            if (closeButton) {
+              closeButton.addEventListener("click", close);
+            }
+            const timeout = kind === "error" ? 5200 : (kind === "pending" ? 2400 : 3600);
+            window.setTimeout(close, timeout);
+          }
+
           function setStatus(node, kind, html) {
             node.className = "upload-status is-" + kind;
             node.innerHTML = html;
+            if (node && node.dataset && node.dataset.popupStatus === "true" && html) {
+              showToast(kind, html);
+            }
           }
+
+          loginStatus.dataset.popupStatus = "true";
 
           async function readJson(response) {
             return response.json().catch(() => ({}));

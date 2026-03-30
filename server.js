@@ -9,6 +9,7 @@ const { spawnSync } = require("child_process");
 
 const ROOT = __dirname;
 const SITE_DIR = path.join(ROOT, "site");
+const PYTHON_VENDOR_DIR = path.join(ROOT, ".python-packages");
 const TINYMCE_DIR = path.join(ROOT, "node_modules", "tinymce");
 const CKEDITOR_DIR = path.join(ROOT, "node_modules", "@ckeditor", "ckeditor5-build-decoupled-document", "build");
 const QUILL_DIST_DIR = path.join(ROOT, "node_modules", "quill", "dist");
@@ -24,11 +25,23 @@ const SUBMISSIONS_DIR = path.join(DATA_DIR, "submissoes");
 const DOCX_IMPORTS_DIR = path.join(DATA_DIR, "docx-imports");
 const DOCX_IMPORT_TTL_MS = 1000 * 60 * 60 * 24;
 const NOTICE_RETENTION_MS = 1000 * 60 * 60 * 24 * 60;
+const DASHBOARD_HISTORY_DAYS = 365;
+const GEO_LOOKUP_URL = "https://ipwho.is/";
+const GEO_LOOKUP_TIMEOUT_MS = 2500;
+const geoLookupCache = new Map();
 
 const SESSION_COOKIE_NAME = "barravento_member_session";
 const SESSION_MAX_AGE = 1000 * 60 * 60 * 24 * 7;
 const PASSWORD_ROUNDS = 240000;
+const DOCX_MAX_BYTES = 8 * 1024 * 1024;
+const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+const MULTIPART_FILE_MAX_BYTES = Math.max(DOCX_MAX_BYTES, IMAGE_MAX_BYTES);
 const ALLOWED_IMAGE_SUFFIXES = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const DOCX_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/octet-stream",
+  "application/zip"
+]);
 const CATEGORY_OPTIONS = new Set([
   "Editoriais",
   "Entrevistas",
@@ -55,12 +68,58 @@ const ROLE_LABELS = {
 const DEFAULT_MEMBER_ROLE = "reviewer";
 
 const sessions = new Map();
-const upload = multer({ storage: multer.memoryStorage() });
+const rateLimitBuckets = new Map();
+const uploadDocx = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: DOCX_MAX_BYTES,
+    files: 1,
+    fields: 10
+  }
+});
+const uploadArticle = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MULTIPART_FILE_MAX_BYTES,
+    files: 2,
+    fields: 30
+  }
+});
 const app = express();
 
+app.disable("x-powered-by");
 app.use(cookieParser());
 app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "200kb" }));
+app.use((req, res, next) => {
+  const secureRequest = req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
+  const csp = [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "frame-ancestors 'self'",
+    "form-action 'self'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data: https:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline'",
+    "connect-src 'self' https://ipwho.is",
+    "frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com"
+  ].join("; ");
+  res.setHeader("Content-Security-Policy", csp);
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  if (secureRequest) {
+    res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
+  }
+  if (req.path.startsWith("/api/members/") || req.path.startsWith("/membros/previas/")) {
+    res.setHeader("Cache-Control", "no-store");
+  }
+  next();
+});
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
@@ -116,6 +175,140 @@ function createError(status, message) {
   error.status = status;
   return error;
 }
+
+function bucketKeyFromRequest(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  return normalizeClientIp(forwarded || req.ip || req.socket?.remoteAddress || "") || "desconhecido";
+}
+
+function createRateLimiter({ name, windowMs, max, message }) {
+  return (req, _res, next) => {
+    const now = Date.now();
+    const key = `${name}:${bucketKeyFromRequest(req)}`;
+    const current = rateLimitBuckets.get(key);
+    const active = current && current.resetAt > now
+      ? current
+      : { count: 0, resetAt: now + windowMs };
+    active.count += 1;
+    rateLimitBuckets.set(key, active);
+
+    if (rateLimitBuckets.size > 5000) {
+      for (const [entryKey, entry] of rateLimitBuckets.entries()) {
+        if (!entry || entry.resetAt <= now) {
+          rateLimitBuckets.delete(entryKey);
+        }
+      }
+    }
+
+    if (active.count > max) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((active.resetAt - now) / 1000));
+      next(Object.assign(createError(429, message), { retryAfter: retryAfterSeconds }));
+      return;
+    }
+    next();
+  };
+}
+
+function startsWithBytes(buffer, bytes) {
+  if (!Buffer.isBuffer(buffer) || !Array.isArray(bytes) || buffer.length < bytes.length) {
+    return false;
+  }
+  return bytes.every((byte, index) => buffer[index] === byte);
+}
+
+function hasZipSignature(buffer) {
+  return (
+    startsWithBytes(buffer, [0x50, 0x4b, 0x03, 0x04]) ||
+    startsWithBytes(buffer, [0x50, 0x4b, 0x05, 0x06]) ||
+    startsWithBytes(buffer, [0x50, 0x4b, 0x07, 0x08])
+  );
+}
+
+function validateDocxFile(file, { required = false } = {}) {
+  if (!file || !file.buffer?.length) {
+    if (required) {
+      throw createError(400, "Selecione um arquivo .docx para continuar.");
+    }
+    return null;
+  }
+  const originalname = sanitizeDocxName(file.originalname);
+  const mimetype = String(file.mimetype || "").trim().toLowerCase();
+  if (mimetype && !DOCX_MIME_TYPES.has(mimetype)) {
+    throw createError(400, "Envie apenas arquivos DOCX validos.");
+  }
+  if (Number(file.size || file.buffer.length || 0) > DOCX_MAX_BYTES) {
+    throw createError(413, "O arquivo DOCX excede o limite de 8 MB.");
+  }
+  if (!hasZipSignature(file.buffer)) {
+    throw createError(400, "O arquivo enviado nao parece ser um DOCX valido.");
+  }
+  const hasContentTypes = file.buffer.includes(Buffer.from("[Content_Types].xml"));
+  const hasWordDocument = file.buffer.includes(Buffer.from("word/document.xml"));
+  if (!hasContentTypes || !hasWordDocument) {
+    throw createError(400, "O arquivo enviado nao parece ser um DOCX valido.");
+  }
+  return { ...file, originalname };
+}
+
+function validateImageFile(file, { required = false } = {}) {
+  if (!file || !file.buffer?.length) {
+    if (required) {
+      throw createError(400, "Selecione uma imagem de capa para publicar.");
+    }
+    return null;
+  }
+  const suffix = sanitizeImageName(file.originalname);
+  if (Number(file.size || file.buffer.length || 0) > IMAGE_MAX_BYTES) {
+    throw createError(413, "A imagem excede o limite de 10 MB.");
+  }
+  const jpeg = startsWithBytes(file.buffer, [0xff, 0xd8, 0xff]);
+  const png = startsWithBytes(file.buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const webp = startsWithBytes(file.buffer, [0x52, 0x49, 0x46, 0x46]) && file.buffer.slice(8, 12).toString("ascii") === "WEBP";
+  const validBySuffix = (
+    ((suffix === ".jpg" || suffix === ".jpeg") && jpeg) ||
+    (suffix === ".png" && png) ||
+    (suffix === ".webp" && webp)
+  );
+  if (!validBySuffix) {
+    throw createError(400, "A imagem enviada nao corresponde ao formato informado.");
+  }
+  return file;
+}
+
+const authRateLimit = createRateLimiter({
+  name: "auth",
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: "Muitas tentativas de autenticacao. Aguarde alguns minutos e tente novamente."
+});
+
+const registerRateLimit = createRateLimiter({
+  name: "register",
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: "Muitos cadastros enviados deste endereco. Aguarde um pouco antes de tentar de novo."
+});
+
+const docxImportRateLimit = createRateLimiter({
+  name: "docx-import",
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: "Muitas importacoes de DOCX em pouco tempo. Aguarde alguns minutos."
+});
+
+const memberWriteRateLimit = createRateLimiter({
+  name: "member-write",
+  windowMs: 15 * 60 * 1000,
+  max: 40,
+  message: "Muitas operacoes enviadas em pouco tempo. Aguarde um pouco e tente novamente."
+});
+
+const approvalRateLimit = createRateLimiter({
+  name: "approval-write",
+  windowMs: 10 * 60 * 1000,
+  max: 60,
+  message: "Muitas acoes de aprovacao em pouco tempo. Aguarde alguns instantes."
+});
 
 function hashPassword(password, saltHex) {
   const salt = saltHex ? Buffer.from(saltHex, "hex") : crypto.randomBytes(16);
@@ -346,18 +539,22 @@ function requireArticleTitle(value) {
 }
 
 async function previewDocxFile(file) {
-  if (!file || !file.buffer?.length) {
-    throw createError(400, "Selecione um arquivo .docx para importar.");
-  }
-  sanitizeDocxName(file.originalname);
+  const safeFile = validateDocxFile(file, { required: true });
   const [htmlResult, textResult] = await Promise.all([
-    mammoth.convertToHtml({ buffer: file.buffer }),
-    mammoth.extractRawText({ buffer: file.buffer })
+    mammoth.convertToHtml(
+      { buffer: safeFile.buffer },
+      {
+        ignoreEmptyParagraphs: false,
+        includeDefaultStyleMap: true,
+        includeEmbeddedStyleMap: true
+      }
+    ),
+    mammoth.extractRawText({ buffer: safeFile.buffer })
   ]);
   const html = sanitizeArticleHtml(htmlResult.value || "");
   const rawText = normalizeEditorValue(textResult.value || "");
   const lines = rawText.split(/\n+/).map((item) => compactWhitespace(item)).filter(Boolean);
-  const guessedTitle = lines[0] || path.parse(file.originalname).name;
+  const guessedTitle = lines[0] || path.parse(safeFile.originalname).name;
   const guessedAuthor = /^por[: ]/i.test(lines[1] || "") ? lines[1].replace(/^por[: ]/i, "").trim() : "";
   return {
     ok: true,
@@ -423,22 +620,20 @@ function cleanupExpiredImportedDocx(maxAgeMs = DOCX_IMPORT_TTL_MS) {
 }
 
 function saveImportedDocx(file) {
-  if (!file || !file.buffer?.length) {
-    throw createError(400, "Selecione um arquivo .docx para importar.");
-  }
-  const originalname = sanitizeDocxName(file.originalname);
+  const safeFile = validateDocxFile(file, { required: true });
+  const originalname = safeFile.originalname;
   cleanupExpiredImportedDocx();
   ensureDir(DOCX_IMPORTS_DIR);
-  const hash = crypto.createHash("sha256").update(file.buffer).digest("hex").slice(0, 24);
+  const hash = crypto.createHash("sha256").update(safeFile.buffer).digest("hex").slice(0, 24);
   const importId = `${hash}-${slugify(path.parse(originalname).name) || "texto"}.docx`;
   const docxPath = importedDocxFilePath(importId);
   if (!fs.existsSync(docxPath)) {
-    fs.writeFileSync(docxPath, file.buffer);
+    fs.writeFileSync(docxPath, safeFile.buffer);
   }
   writeJsonFile(importedDocxMetaPath(importId), {
     import_id: importId,
     originalname,
-    size: file.buffer.length,
+    size: safeFile.buffer.length,
     created_at: new Date().toISOString().slice(0, 19),
     last_used_at: new Date().toISOString().slice(0, 19)
   });
@@ -480,12 +675,11 @@ function loadImportedDocx(importId) {
 function resolveDocxInput(req, { required = false, message } = {}) {
   const imported = loadImportedDocx(req.body.docx_import_id);
   if (imported) {
-    return imported;
+    return validateDocxFile(imported, { required });
   }
   const direct = req.files?.docx?.[0];
   if (direct?.buffer?.length) {
-    sanitizeDocxName(direct.originalname);
-    return direct;
+    return validateDocxFile(direct, { required });
   }
   if (required) {
     throw createError(400, message || "Selecione um arquivo .docx para continuar.");
@@ -674,6 +868,49 @@ function sanitizeInlineStyle(value) {
       const safeFamily = input.replace(/[^a-z0-9,\- "'_]/gi, "").trim();
       if (safeFamily) {
         allowed.push(`${name}:${safeFamily}`);
+      }
+      continue;
+    }
+    if (name === "font-weight") {
+      if (/^(normal|bold|bolder|lighter|[1-9]00)$/i.test(input)) {
+        allowed.push(`${name}:${input.toLowerCase()}`);
+      }
+      continue;
+    }
+    if (name === "font-style") {
+      if (/^(normal|italic|oblique)$/i.test(input)) {
+        allowed.push(`${name}:${input.toLowerCase()}`);
+      }
+      continue;
+    }
+    if (name === "text-decoration") {
+      const normalized = input.toLowerCase().replace(/\s+/g, " ").trim();
+      if (/^(none|underline|line-through|underline line-through|line-through underline)$/.test(normalized)) {
+        allowed.push(`${name}:${normalized}`);
+      }
+      continue;
+    }
+    if (name === "line-height") {
+      if (/^([0-9]+(\.[0-9]+)?)(px|pt|em|rem|%)?$/i.test(input) || /^(normal)$/i.test(input)) {
+        allowed.push(`${name}:${input}`);
+      }
+      continue;
+    }
+    if (name === "letter-spacing") {
+      if (/^-?([0-9]+(\.[0-9]+)?)(px|pt|em|rem)$/i.test(input) || /^(normal)$/i.test(input)) {
+        allowed.push(`${name}:${input}`);
+      }
+      continue;
+    }
+    if (name === "white-space") {
+      if (/^(normal|pre|pre-wrap|pre-line|nowrap)$/i.test(input)) {
+        allowed.push(`${name}:${input.toLowerCase()}`);
+      }
+      continue;
+    }
+    if (name === "margin-left" || name === "padding-left" || name === "text-indent") {
+      if (/^-?([0-9]+(\.[0-9]+)?)(px|pt|em|rem|%)$/i.test(input)) {
+        allowed.push(`${name}:${input}`);
       }
       continue;
     }
@@ -973,21 +1210,34 @@ function formatLongDate(dateLike) {
 }
 
 function runBuildScript() {
+  const vendorDir = PYTHON_VENDOR_DIR;
+  const buildScript = process.platform === "win32" ? "scripts\\gerar_site.py" : "scripts/gerar_site.py";
+  const embeddedBootstrap = [
+    "import runpy, sys",
+    `sys.path.insert(0, r"${vendorDir.replace(/\\/g, "\\\\")}")`,
+    `runpy.run_path(r"${path.join(ROOT, buildScript).replace(/\\/g, "\\\\")}", run_name="__main__")`
+  ].join("; ");
   const commands = process.platform === "win32"
     ? [
-        ["python", ["scripts\\gerar_site.py"]],
-        ["py", ["-3", "scripts\\gerar_site.py"]]
+        ["python", [buildScript]],
+        ["python3", [buildScript]],
+        ["py", ["-3", buildScript]],
+        ["C:\\Program Files\\FormatFactory\\FFModules\\python\\python.exe", ["-c", embeddedBootstrap]]
       ]
     : [
-        ["python3", ["scripts/gerar_site.py"]],
-        ["python", ["scripts/gerar_site.py"]]
+        ["python3", [buildScript]],
+        ["python", [buildScript]]
       ];
 
   let lastError = null;
   for (const [command, args] of commands) {
     const result = spawnSync(command, args, {
       cwd: ROOT,
-      encoding: "utf8"
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PYTHONPATH: vendorDir + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : "")
+      }
     });
     if (!result.error && result.status === 0) {
       return;
@@ -1087,10 +1337,7 @@ function deleteArticleSubmission(req, member) {
 
 function createArticle(req) {
   const docx = resolveDocxInput(req, { required: true, message: "Selecione um arquivo .docx para publicar." });
-  const image = req.files?.image?.[0];
-  if (!image || !image.buffer?.length) {
-    throw createError(400, "Selecione uma imagem de capa para publicar.");
-  }
+  const image = validateImageFile(req.files?.image?.[0], { required: true });
 
   const title = requireArticleTitle(req.body.title);
   const categories = parseCategories(req.body.categories);
@@ -1121,7 +1368,7 @@ function createArticle(req) {
     updated_at: nowStamp
   };
   if (bodyHtml || bodyBlocks.length || body) {
-    const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body);
+    const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body || richHtmlToText(bodyHtml));
     if (!nextBodyBlocks.length) {
       throw createError(400, "Escreva o corpo do texto antes de publicar.");
     }
@@ -1165,12 +1412,11 @@ function editArticle(req) {
   const currentDocxBytes = fs.readFileSync(docxPath);
   const docxChanged = Boolean(newDocx && newDocx.buffer && !newDocx.buffer.equals(currentDocxBytes));
 
-  const newImage = req.files?.image?.[0];
+  const newImage = validateImageFile(req.files?.image?.[0]);
   let imageChanged = false;
   const currentImageName = currentSidecar.image_file || "";
   const currentImagePath = currentImageName ? path.join(UPLOADS_DIR, currentImageName) : null;
   if (newImage && newImage.buffer?.length) {
-    sanitizeImageName(newImage.originalname);
     imageChanged = !currentImagePath || !fs.existsSync(currentImagePath) || !newImage.buffer.equals(fs.readFileSync(currentImagePath));
   }
 
@@ -1227,7 +1473,7 @@ function editArticle(req) {
   };
 
   if (bodyChanged) {
-    const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body);
+    const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body || richHtmlToText(bodyHtml));
     if (!nextBodyBlocks.length) {
       throw createError(400, "Escreva o corpo do texto antes de salvar a edicao.");
     }
@@ -1594,18 +1840,13 @@ function createPendingSubmission({ kind, member, payload, docx, image }) {
 
 function createArticleSubmission(req, member) {
   const docx = resolveDocxInput(req, { required: true, message: "Selecione um arquivo .docx para publicar." });
-  const image = req.files?.image?.[0];
-  if (!image || !image.buffer?.length) {
-    throw createError(400, "Selecione uma imagem de capa para publicar.");
-  }
-
-  sanitizeImageName(image.originalname);
+  const image = validateImageFile(req.files?.image?.[0], { required: true });
   const title = requireArticleTitle(req.body.title);
   const categories = parseCategories(req.body.categories);
   const body = normalizeEditorValue(req.body.body);
   const bodyHtml = sanitizeArticleHtml(req.body.body_html);
   const bodyBlocks = parseBodyBlocksField(req.body.body_blocks_json);
-  const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body);
+  const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body || richHtmlToText(bodyHtml));
   if (!nextBodyBlocks.length) {
     throw createError(400, "Escreva o corpo do texto antes de publicar.");
   }
@@ -1669,12 +1910,11 @@ function editArticleSubmission(req, member) {
   const currentDocxBytes = fs.readFileSync(docxPath);
   const docxChanged = Boolean(newDocx && newDocx.buffer && !newDocx.buffer.equals(currentDocxBytes));
 
-  const newImage = req.files?.image?.[0];
+  const newImage = validateImageFile(req.files?.image?.[0]);
   let imageChanged = false;
   const currentImageName = currentSidecar.image_file || "";
   const currentImagePath = currentImageName ? path.join(UPLOADS_DIR, currentImageName) : null;
   if (newImage && newImage.buffer?.length) {
-    sanitizeImageName(newImage.originalname);
     imageChanged = !currentImagePath || !fs.existsSync(currentImagePath) || !newImage.buffer.equals(fs.readFileSync(currentImagePath));
   }
 
@@ -1709,7 +1949,7 @@ function editArticleSubmission(req, member) {
       summary,
       body,
       body_html: bodyHtml,
-      body_blocks: bodyBlocks,
+      body_blocks: bodyBlocks.length ? bodyBlocks : blocksToSidecar(body || richHtmlToText(bodyHtml)),
       categories,
       tags,
       hashtags
@@ -1842,21 +2082,345 @@ function rejectSubmissionItem(submissionId) {
 
 function readStats() {
   const raw = readJsonFile(STATS_FILE, { articles: {} });
-  return raw.articles && typeof raw.articles === "object" ? raw.articles : {};
+  const source = raw.articles && typeof raw.articles === "object" ? raw.articles : {};
+  const normalized = {};
+  for (const [slug, entry] of Object.entries(source)) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const views = Number(entry.views || 0);
+    const pdfDownloads = Number(entry.pdf_downloads || 0);
+    const updatedAt = String(entry.updated_at || "").trim();
+    const dailySource = entry.daily && typeof entry.daily === "object" ? entry.daily : {};
+    const locationsSource = entry.locations && typeof entry.locations === "object" ? entry.locations : {};
+    const dailyLocationsSource = entry.daily_locations && typeof entry.daily_locations === "object" ? entry.daily_locations : {};
+    const daily = {};
+    const locations = {};
+    const dailyLocations = {};
+    for (const [dateKey, dayEntry] of Object.entries(dailySource)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || "")) || !dayEntry || typeof dayEntry !== "object") {
+        continue;
+      }
+      daily[dateKey] = {
+        views: Number(dayEntry.views || 0),
+        pdf_downloads: Number(dayEntry.pdf_downloads || 0)
+      };
+    }
+    for (const [locationKey, count] of Object.entries(locationsSource)) {
+      if (!String(locationKey || "").trim()) {
+        continue;
+      }
+      locations[locationKey] = Number(count || 0);
+    }
+    for (const [dateKey, locationEntry] of Object.entries(dailyLocationsSource)) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || "")) || !locationEntry || typeof locationEntry !== "object") {
+        continue;
+      }
+      dailyLocations[dateKey] = {};
+      for (const [locationKey, count] of Object.entries(locationEntry)) {
+        if (!String(locationKey || "").trim()) {
+          continue;
+        }
+        dailyLocations[dateKey][locationKey] = Number(count || 0);
+      }
+    }
+    if (!Object.keys(daily).length && updatedAt && (views > 0 || pdfDownloads > 0)) {
+      daily[updatedAt.slice(0, 10)] = {
+        views,
+        pdf_downloads: pdfDownloads
+      };
+    }
+    normalized[slug] = {
+      views,
+      pdf_downloads: pdfDownloads,
+      updated_at: updatedAt,
+      daily,
+      locations: pruneLocationTotals(locations),
+      daily_locations: Object.fromEntries(
+        Object.entries(dailyLocations)
+          .sort((left, right) => left[0].localeCompare(right[0]))
+          .slice(-DASHBOARD_HISTORY_DAYS)
+          .map(([dayKey, locationEntry]) => [dayKey, pruneLocationTotals(locationEntry, 80)])
+      )
+    };
+  }
+  return normalized;
 }
 
 function writeStats(stats) {
   writeJsonFile(STATS_FILE, { articles: stats });
 }
 
-function recordStat(slug, kind) {
+function pruneDailyStats(daily) {
+  const entries = Object.entries(daily || {}).sort((left, right) => left[0].localeCompare(right[0]));
+  const trimmed = entries.slice(-DASHBOARD_HISTORY_DAYS);
+  return Object.fromEntries(trimmed);
+}
+
+function pruneLocationTotals(locations, limit = 250) {
+  return Object.fromEntries(
+    Object.entries(locations || {})
+      .filter((entry) => entry[0] && Number(entry[1] || 0) > 0)
+      .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0))
+      .slice(0, limit)
+  );
+}
+
+function startOfDay(dateLike = Date.now()) {
+  const value = new Date(dateLike);
+  value.setHours(0, 0, 0, 0);
+  return value;
+}
+
+function parseDashboardPeriod(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (value === "all") {
+    return { key: "all", days: 0, label: "Todo o periodo" };
+  }
+  const allowed = new Map([
+    ["7", "Ultimos 7 dias"],
+    ["30", "Ultimos 30 dias"],
+    ["90", "Ultimos 90 dias"],
+    ["365", "Ultimos 365 dias"]
+  ]);
+  if (allowed.has(value)) {
+    return { key: value, days: Number(value), label: allowed.get(value) };
+  }
+  return { key: "30", days: 30, label: "Ultimos 30 dias" };
+}
+
+function listPeriodDays(period) {
+  const today = startOfDay();
+  if (!period.days) {
+    return [];
+  }
+  const days = [];
+  for (let offset = period.days - 1; offset >= 0; offset -= 1) {
+    const current = new Date(today);
+    current.setDate(current.getDate() - offset);
+    days.push(current.toISOString().slice(0, 10));
+  }
+  return days;
+}
+
+function normalizeLocationKey(country, region, city) {
+  const parts = [country, region, city]
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return parts.join("|");
+}
+
+function formatLocationLabel(locationKey) {
+  return String(locationKey || "")
+    .split("|")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function normalizeClientIp(rawValue) {
+  const source = Array.isArray(rawValue) ? rawValue[0] : String(rawValue || "").split(",")[0] || "";
+  const trimmed = String(source || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.replace(/^::ffff:/i, "");
+}
+
+function isPrivateIp(ip) {
+  if (!ip) {
+    return true;
+  }
+  if (ip === "::1" || ip === "127.0.0.1" || ip === "localhost") {
+    return true;
+  }
+  if (/^10\./.test(ip) || /^192\.168\./.test(ip) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip)) {
+    return true;
+  }
+  if (/^fc|^fd|^fe80/i.test(ip)) {
+    return true;
+  }
+  return false;
+}
+
+function requestClientIp(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  return normalizeClientIp(forwarded || req.ip || req.socket?.remoteAddress || "");
+}
+
+async function resolveLocationFromIp(ip) {
+  const safeIp = normalizeClientIp(ip);
+  if (!safeIp || isPrivateIp(safeIp)) {
+    return {
+      country: "Local",
+      region: "Rede local",
+      city: "Desenvolvimento",
+      key: "Local|Rede local|Desenvolvimento"
+    };
+  }
+  if (geoLookupCache.has(safeIp)) {
+    return geoLookupCache.get(safeIp);
+  }
+  try {
+    const response = await fetch(`${GEO_LOOKUP_URL}${encodeURIComponent(safeIp)}`, {
+      signal: AbortSignal.timeout(GEO_LOOKUP_TIMEOUT_MS)
+    });
+    const payload = await response.json().catch(() => ({}));
+    const location = {
+      country: String(payload.country_code || payload.country || "Desconhecido").trim() || "Desconhecido",
+      region: String(payload.region_code || payload.region || "Sem regiao").trim() || "Sem regiao",
+      city: String(payload.city || "Sem cidade").trim() || "Sem cidade"
+    };
+    location.key = normalizeLocationKey(location.country, location.region, location.city);
+    if (geoLookupCache.size > 5000) {
+      geoLookupCache.clear();
+    }
+    geoLookupCache.set(safeIp, location);
+    return location;
+  } catch {
+    const fallback = {
+      country: "Desconhecido",
+      region: "Desconhecido",
+      city: "Desconhecido",
+      key: "Desconhecido|Desconhecido|Desconhecido"
+    };
+    if (geoLookupCache.size > 5000) {
+      geoLookupCache.clear();
+    }
+    geoLookupCache.set(safeIp, fallback);
+    return fallback;
+  }
+}
+
+function articleStatsForPeriod(entry, period) {
+  const safeEntry = entry && typeof entry === "object" ? entry : {};
+  const daily = safeEntry.daily && typeof safeEntry.daily === "object" ? safeEntry.daily : {};
+  if (!period.days) {
+    return {
+      views: Number(safeEntry.views || 0),
+      pdf_downloads: Number(safeEntry.pdf_downloads || 0)
+    };
+  }
+  let views = 0;
+  let pdfDownloads = 0;
+  for (const dayKey of listPeriodDays(period)) {
+    const dayEntry = daily[dayKey] || {};
+    views += Number(dayEntry.views || 0);
+    pdfDownloads += Number(dayEntry.pdf_downloads || 0);
+  }
+  return { views, pdf_downloads: pdfDownloads };
+}
+
+function articleLocationCountsForPeriod(entry, period) {
+  const safeEntry = entry && typeof entry === "object" ? entry : {};
+  const locations = safeEntry.locations && typeof safeEntry.locations === "object" ? safeEntry.locations : {};
+  const dailyLocations = safeEntry.daily_locations && typeof safeEntry.daily_locations === "object" ? safeEntry.daily_locations : {};
+  if (!period.days) {
+    return { ...locations };
+  }
+  const totals = {};
+  for (const dayKey of listPeriodDays(period)) {
+    const dayLocations = dailyLocations[dayKey] && typeof dailyLocations[dayKey] === "object" ? dailyLocations[dayKey] : {};
+    for (const [locationKey, count] of Object.entries(dayLocations)) {
+      totals[locationKey] = Number(totals[locationKey] || 0) + Number(count || 0);
+    }
+  }
+  return totals;
+}
+
+function dashboardSeries(stats, rows, period) {
+  const labels = period.days ? listPeriodDays(period) : (() => {
+    const keys = new Set();
+    for (const row of rows) {
+      const entry = stats[row.slug];
+      const daily = entry && typeof entry.daily === "object" ? entry.daily : {};
+      Object.keys(daily).forEach((key) => keys.add(key));
+    }
+    return Array.from(keys).sort((left, right) => left.localeCompare(right)).slice(-DASHBOARD_HISTORY_DAYS);
+  })();
+
+  return labels.map((dayKey) => {
+    let views = 0;
+    let pdfDownloads = 0;
+    for (const row of rows) {
+      const entry = stats[row.slug];
+      const dayEntry = entry && entry.daily ? entry.daily[dayKey] || {} : {};
+      views += Number(dayEntry.views || 0);
+      pdfDownloads += Number(dayEntry.pdf_downloads || 0);
+    }
+    return {
+      label: dayKey,
+      views,
+      pdf_downloads: pdfDownloads
+    };
+  });
+}
+
+function dashboardPie(rows) {
+  return rows
+    .filter((item) => Number(item.views || 0) > 0)
+    .slice(0, 5)
+    .map((item) => ({
+      label: item.title,
+      value: Number(item.views || 0)
+    }));
+}
+
+function dashboardLocations(stats, rows, period) {
+  const totals = {};
+  for (const row of rows) {
+    const entry = stats[row.slug];
+    const locationCounts = articleLocationCountsForPeriod(entry, period);
+    for (const [locationKey, count] of Object.entries(locationCounts)) {
+      totals[locationKey] = Number(totals[locationKey] || 0) + Number(count || 0);
+    }
+  }
+  return Object.entries(totals)
+    .filter((entry) => Number(entry[1] || 0) > 0)
+    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0))
+    .slice(0, 8)
+    .map(([key, value]) => ({
+      key,
+      label: formatLocationLabel(key),
+      value: Number(value || 0)
+    }));
+}
+
+async function recordStat(slug, kind, req) {
   if (!slug || !["views", "pdf_downloads"].includes(kind)) {
     return;
   }
   const stats = readStats();
-  const entry = stats[slug] || { views: 0, pdf_downloads: 0, updated_at: "" };
+  const entry = stats[slug] || { views: 0, pdf_downloads: 0, updated_at: "", daily: {}, locations: {}, daily_locations: {} };
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const dayEntry = entry.daily && typeof entry.daily === "object" ? (entry.daily[dayKey] || { views: 0, pdf_downloads: 0 }) : { views: 0, pdf_downloads: 0 };
+  const location = await resolveLocationFromIp(requestClientIp(req));
+  const locationKey = normalizeLocationKey(location.country, location.region, location.city);
+  const dayLocations = entry.daily_locations && typeof entry.daily_locations === "object"
+    ? (entry.daily_locations[dayKey] && typeof entry.daily_locations[dayKey] === "object" ? entry.daily_locations[dayKey] : {})
+    : {};
   entry[kind] = Number(entry[kind] || 0) + 1;
   entry.updated_at = new Date().toISOString().slice(0, 19);
+  dayEntry[kind] = Number(dayEntry[kind] || 0) + 1;
+  entry.daily = pruneDailyStats({
+    ...(entry.daily && typeof entry.daily === "object" ? entry.daily : {}),
+    [dayKey]: dayEntry
+  });
+  entry.locations = pruneLocationTotals({
+    ...(entry.locations && typeof entry.locations === "object" ? entry.locations : {}),
+    [locationKey]: Number((entry.locations && entry.locations[locationKey]) || 0) + 1
+  });
+  entry.daily_locations = Object.fromEntries(
+    Object.entries({
+      ...(entry.daily_locations && typeof entry.daily_locations === "object" ? entry.daily_locations : {}),
+      [dayKey]: pruneLocationTotals({
+        ...dayLocations,
+        [locationKey]: Number(dayLocations[locationKey] || 0) + 1
+      }, 80)
+    })
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .slice(-DASHBOARD_HISTORY_DAYS)
+  );
   stats[slug] = entry;
   writeStats(stats);
 }
@@ -1880,15 +2444,16 @@ function pdfSlugFromRequestPath(requestPath) {
   return path.parse(parts[1]).name;
 }
 
-function dashboardRows() {
+function dashboardRows(period) {
   const stats = readStats();
   const rows = loadUploadPageArticles().map((article) => {
     const entry = stats[article.slug] || {};
+    const filtered = articleStatsForPeriod(entry, period);
     return {
       slug: article.slug,
       title: article.title,
-      views: Number(entry.views || 0),
-      pdf_downloads: Number(entry.pdf_downloads || 0),
+      views: Number(filtered.views || 0),
+      pdf_downloads: Number(filtered.pdf_downloads || 0),
       published_label: article.published_label || formatLongDate(Date.now()),
       article_url: article.article_url || `/artigos/${article.slug}/`,
       pdf_url: article.pdf_url || `/pdfs/${article.slug}.pdf`
@@ -1915,7 +2480,7 @@ app.get("/api/members/session", (req, res) => {
   });
 });
 
-app.post("/api/members/register", (req, res, next) => {
+app.post("/api/members/register", requireMember, requireAdmin, registerRateLimit, (req, res, next) => {
   try {
     const name = validateName(req.body.name);
     const email = validateEmail(req.body.email);
@@ -1945,23 +2510,20 @@ app.post("/api/members/register", (req, res, next) => {
   }
 });
 
-app.post("/api/members/login", (req, res, next) => {
+app.post("/api/members/login", authRateLimit, (req, res, next) => {
   try {
     const email = validateEmail(req.body.email);
     const password = validatePassword(req.body.password);
     const members = readMembers();
     const member = members[email];
-    if (!verifyPassword(password, member)) {
-      throw createError(401, "E-mail ou senha invalidos.");
-    }
-    if (!member.approved) {
-      throw createError(403, "Cadastro aguardando aprovacao do Conselho Editorial.");
+    if (!member || !verifyPassword(password, member) || !member.approved) {
+      throw createError(401, "Nao foi possivel concluir o login com essas credenciais.");
     }
     const token = createSession(email);
     const secureCookie = req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
     res.cookie(SESSION_COOKIE_NAME, token, {
       httpOnly: true,
-      sameSite: "lax",
+      sameSite: "strict",
       secure: secureCookie,
       path: "/",
       maxAge: SESSION_MAX_AGE
@@ -1984,7 +2546,7 @@ app.post("/api/members/logout", (req, res) => {
   const secureCookie = req.secure || String(req.headers["x-forwarded-proto"] || "").toLowerCase() === "https";
   res.clearCookie(SESSION_COOKIE_NAME, {
     httpOnly: true,
-    sameSite: "lax",
+    sameSite: "strict",
     secure: secureCookie,
     path: "/"
   });
@@ -2002,7 +2564,7 @@ app.get("/api/members/notices", requireMember, (req, res) => {
   });
 });
 
-app.post("/api/members/notices", requireMember, (req, res, next) => {
+app.post("/api/members/notices", requireMember, memberWriteRateLimit, (req, res, next) => {
   try {
     const item = addNotice(req.member, req.body.message);
     res.status(201).json({
@@ -2015,10 +2577,23 @@ app.post("/api/members/notices", requireMember, (req, res, next) => {
   }
 });
 
-app.get("/api/members/dashboard", requireMember, (_req, res) => {
+app.get("/api/members/dashboard", requireMember, (req, res) => {
+  const period = parseDashboardPeriod(req.query.period);
+  const stats = readStats();
+  const items = dashboardRows(period);
+  const totals = items.reduce((acc, item) => {
+    acc.views += Number(item.views || 0);
+    acc.pdf_downloads += Number(item.pdf_downloads || 0);
+    return acc;
+  }, { views: 0, pdf_downloads: 0 });
   res.json({
     ok: true,
-    items: dashboardRows()
+    period,
+    totals,
+    items,
+    series: dashboardSeries(stats, items, period),
+    pie: dashboardPie(items),
+    locations: dashboardLocations(stats, items, period)
   });
 });
 
@@ -2043,7 +2618,7 @@ app.get("/api/members/approvals", requireMember, requireAdmin, (req, res) => {
   });
 });
 
-app.post("/api/members/approvals/registrations/approve", requireMember, requireAdmin, (req, res, next) => {
+app.post("/api/members/approvals/registrations/approve", requireMember, requireAdmin, approvalRateLimit, (req, res, next) => {
   try {
     const approved = approveMemberRegistration(req.body.email);
     res.json({
@@ -2057,7 +2632,7 @@ app.post("/api/members/approvals/registrations/approve", requireMember, requireA
   }
 });
 
-app.post("/api/members/approvals/submissions/approve", requireMember, requireAdmin, (req, res, next) => {
+app.post("/api/members/approvals/submissions/approve", requireMember, requireAdmin, approvalRateLimit, (req, res, next) => {
   try {
     const result = approveSubmissionItem(req.body.id);
     const items = readSubmissions();
@@ -2076,7 +2651,7 @@ app.post("/api/members/approvals/submissions/approve", requireMember, requireAdm
   }
 });
 
-app.post("/api/members/approvals/submissions/reject", requireMember, requireAdmin, (req, res, next) => {
+app.post("/api/members/approvals/submissions/reject", requireMember, requireAdmin, approvalRateLimit, (req, res, next) => {
   try {
     const reason = String(req.body.reason || "").replace(/\r\n/g, "\n").trim();
     if (reason.length < 3) {
@@ -2137,7 +2712,7 @@ app.get("/membros/previas/submissoes/:id/arquivo/:filename", requireMember, requ
   }
 });
 
-app.post("/api/docx-import", requireMember, upload.single("docx"), async (req, res, next) => {
+app.post("/api/docx-import", requireMember, docxImportRateLimit, uploadDocx.single("docx"), async (req, res, next) => {
   try {
     const imported = saveImportedDocx(req.file);
     const payload = await previewDocxFile(req.file);
@@ -2151,7 +2726,7 @@ app.post("/api/docx-import", requireMember, upload.single("docx"), async (req, r
   }
 });
 
-app.post("/api/docx-preview", requireMember, upload.single("docx"), async (req, res, next) => {
+app.post("/api/docx-preview", requireMember, docxImportRateLimit, uploadDocx.single("docx"), async (req, res, next) => {
   try {
     const imported = saveImportedDocx(req.file);
     const payload = await previewDocxFile(req.file);
@@ -2165,7 +2740,7 @@ app.post("/api/docx-preview", requireMember, upload.single("docx"), async (req, 
   }
 });
 
-app.post("/api/upload", requireMember, upload.fields([
+app.post("/api/upload", requireMember, memberWriteRateLimit, uploadArticle.fields([
   { name: "docx", maxCount: 1 },
   { name: "image", maxCount: 1 }
 ]), (req, res, next) => {
@@ -2177,7 +2752,7 @@ app.post("/api/upload", requireMember, upload.fields([
   }
 });
 
-app.post("/api/edit", requireMember, upload.fields([
+app.post("/api/edit", requireMember, memberWriteRateLimit, uploadArticle.fields([
   { name: "docx", maxCount: 1 },
   { name: "image", maxCount: 1 }
 ]), (req, res, next) => {
@@ -2189,7 +2764,7 @@ app.post("/api/edit", requireMember, upload.fields([
   }
 });
 
-app.post("/api/delete", requireMember, (req, res, next) => {
+app.post("/api/delete", requireMember, memberWriteRateLimit, (req, res, next) => {
   try {
     const payload = deleteArticleSubmission(req, req.member);
     res.status(202).json(payload);
@@ -2201,11 +2776,11 @@ app.post("/api/delete", requireMember, (req, res, next) => {
 app.use((req, _res, next) => {
   const articleSlug = articleSlugFromRequestPath(req.path);
   if (articleSlug) {
-    recordStat(articleSlug, "views");
+    void recordStat(articleSlug, "views", req);
   }
   const pdfSlug = pdfSlugFromRequestPath(req.path);
   if (pdfSlug) {
-    recordStat(pdfSlug, "pdf_downloads");
+    void recordStat(pdfSlug, "pdf_downloads", req);
   }
   next();
 });
@@ -2227,7 +2802,20 @@ app.use((req, res) => {
 });
 
 app.use((error, _req, res, _next) => {
+  if (error instanceof multer.MulterError) {
+    const message = error.code === "LIMIT_FILE_SIZE"
+      ? `O arquivo enviado excede o limite permitido. DOCX: 8 MB. Imagem: 10 MB.`
+      : "Nao foi possivel processar o upload enviado.";
+    res.status(400).json({
+      ok: false,
+      error: message
+    });
+    return;
+  }
   const status = Number(error.status || 500);
+  if (error.retryAfter) {
+    res.setHeader("Retry-After", String(error.retryAfter));
+  }
   res.status(status).json({
     ok: false,
     error: error.message || "Falha interna no servidor Node."
