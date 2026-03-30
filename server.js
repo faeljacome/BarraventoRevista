@@ -1105,6 +1105,7 @@ function createArticle(req) {
   const body = normalizeEditorValue(req.body.body);
   const bodyHtml = sanitizeArticleHtml(req.body.body_html);
   const bodyBlocks = parseBodyBlocksField(req.body.body_blocks_json);
+  const nowStamp = new Date().toISOString().slice(0, 19);
   const metadata = {
     title,
     author: String(req.body.author || "").trim(),
@@ -1115,7 +1116,9 @@ function createArticle(req) {
     image_scope: "uploads",
     image_file: imageName,
     image_alt: path.parse(image.originalname).name,
-    image_caption: "Imagem enviada na publicacao."
+    image_caption: "Imagem enviada na publicacao.",
+    created_at: nowStamp,
+    updated_at: nowStamp
   };
   if (bodyHtml || bodyBlocks.length || body) {
     const nextBodyBlocks = bodyBlocks.length ? bodyBlocks : blocksToSidecar(body);
@@ -1156,6 +1159,7 @@ function editArticle(req) {
   const body = normalizeEditorValue(req.body.body);
   const bodyHtml = sanitizeArticleHtml(req.body.body_html);
   const bodyBlocks = parseBodyBlocksField(req.body.body_blocks_json);
+  const nowStamp = new Date().toISOString().slice(0, 19);
 
   const newDocx = resolveDocxInput(req);
   const currentDocxBytes = fs.readFileSync(docxPath);
@@ -1217,7 +1221,9 @@ function editArticle(req) {
     image_scope: imageScope,
     image_file: imageFile,
     image_alt: imageAlt,
-    image_caption: imageCaption
+    image_caption: imageCaption,
+    created_at: String(currentSidecar.created_at || "").trim() || nowStamp,
+    updated_at: nowStamp
   };
 
   if (bodyChanged) {

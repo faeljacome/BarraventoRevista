@@ -594,7 +594,7 @@
     {
       "id": "85bc3f624eb7d565",
       "kind": "create",
-      "status": "pending",
+      "status": "rejected",
       "requested_at": "2026-03-27T20:38:59",
       "requested_by": {
         "name": "Revista Barravento",
@@ -1062,9 +1062,8 @@
       "hashtags": [],
       "source_name": "4-lenin-traduzido.docx",
       "docx_filename": "4-lenin-traduzido.docx",
-      "docx_file": "4-lenin-traduzido.docx",
       "image_filename": "Captura de tela 2026-03-10 122945.png",
-      "image_file": "captura-de-tela-2026-03-10-122945.png"
+      "rejected_at": "2026-03-27T20:56:31"
     }
   ]
 }

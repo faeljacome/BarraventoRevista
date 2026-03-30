@@ -97,6 +97,7 @@ class Article:
     lead: str
     reading_time: int
     published_at: datetime
+    updated_at: datetime
     source_name: str
     image_scope: str
     image_file: str
@@ -126,6 +127,21 @@ def slugify(value: str) -> str:
 
 def sidecar_path(path: Path) -> Path:
     return path.with_suffix(".json")
+
+
+def parse_stored_datetime(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for candidate in (text, text.replace("Z", "+00:00")):
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is not None:
+                return parsed.replace(tzinfo=None)
+            return parsed
+        except ValueError:
+            continue
+    return None
 
 
 def normalize_text_value(value: str) -> str:
@@ -726,6 +742,16 @@ def extract_article(path: Path) -> Article:
     tags = parse_csv_list(sidecar_data.get("tags"))
     hashtags = normalize_hashtags(parse_csv_list(sidecar_data.get("hashtags")))
 
+    stat = path.stat()
+    created_at = (
+        parse_stored_datetime(sidecar_data.get("created_at"))
+        or datetime.fromtimestamp(getattr(stat, "st_birthtime", stat.st_mtime))
+    )
+    updated_at = (
+        parse_stored_datetime(sidecar_data.get("updated_at"))
+        or datetime.fromtimestamp(stat.st_mtime)
+    )
+
     return Article(
         slug=path.stem,
         title=title,
@@ -734,7 +760,8 @@ def extract_article(path: Path) -> Article:
         summary=summary,
         lead=lead,
         reading_time=reading_time,
-        published_at=datetime.fromtimestamp(path.stat().st_mtime),
+        published_at=created_at,
+        updated_at=updated_at,
         source_name=path.name,
         image_scope=image_scope,
         image_file=image_file,
@@ -890,7 +917,7 @@ def render_cookie_consent_script(root_prefix: str) -> str:
     return f"""  <script>
     (() => {{
       const consentKey = "barravento-cookie-preferences";
-      const performanceKeys = ["barravento-read-counts"];
+      const performanceKeys = ["barravento-read-counts", "barravento-read-counts-monthly"];
       const performancePrefixes = ["barravento-read-stamp:"];
       const policyLink = {policy_link};
       const banner = document.querySelector("[data-cookie-banner]");
@@ -1217,7 +1244,7 @@ def render_featured_carousel(articles: list[Article]) -> str:
 {chr(10).join(slides)}
             </div>
             <button class="feature-carousel__arrow feature-carousel__arrow--next" type="button" data-feature-next aria-label="Mostrar proximo texto">&#8250;</button>
-            <div class="feature-carousel__controls" aria-label="Ultimos textos publicados">
+            <div class="feature-carousel__controls" aria-label="Ultimos textos criados">
 {chr(10).join(dots)}
             </div>
           </section>"""
@@ -1228,7 +1255,7 @@ def render_most_read_item(article: Article) -> str:
               <a class="most-read__link" href="{article_href(article, '')}">{escape(article.title)}</a>
               <span class="most-read__meta">
                 <span>{format_long_date(article.published_at)}</span>
-                <span data-most-read-count>0 leituras</span>
+                <span data-most-read-count>0 leituras no mes</span>
               </span>
             </li>"""
 
@@ -1241,8 +1268,8 @@ def render_most_read_sidebar(articles: list[Article]) -> str:
             </li>"""
 
     return f"""          <aside class="home-note most-read" data-most-read-list>
-            <span class="eyebrow">Mais lidos</span>
-            <h2>Textos mais lidos</h2>
+            <span class="eyebrow">Mais lidos do mes</span>
+            <h2>Textos mais lidos do mes</h2>
             <ol class="most-read__list">
 {items}
             </ol>
@@ -1509,17 +1536,19 @@ def render_home_page(articles: list[Article]) -> str:
     home_script = """
       <script>
         (() => {
-          const storageKey = "barravento-read-counts";
+          const storageKey = "barravento-read-counts-monthly";
           const list = document.querySelector("[data-most-read-list]");
           let counts = {};
           if (list && window.BarraventoConsent && window.BarraventoConsent.hasPerformanceConsent()) {
             try {
-              counts = JSON.parse(localStorage.getItem(storageKey) || "{}");
+              const monthly = JSON.parse(localStorage.getItem(storageKey) || "{}");
+              const monthKey = new Date().toISOString().slice(0, 7);
+              counts = monthly && typeof monthly === "object" ? (monthly[monthKey] || {}) : {};
             } catch (error) {
               counts = {};
             }
 
-            const pluralize = (value) => value === 1 ? "1 leitura" : value + " leituras";
+            const pluralize = (value) => value === 1 ? "1 leitura no mes" : value + " leituras no mes";
             const items = Array.from(list.querySelectorAll("[data-most-read-item]")).map((item, index) => ({ item, index }));
             items.sort((left, right) => {
               const leftCount = Number(counts[left.item.dataset.slug] || 0);
@@ -4158,10 +4187,12 @@ def render_article_page(article: Article) -> str:
             return;
           }}
           const storageKey = "barravento-read-counts";
+          const monthlyStorageKey = "barravento-read-counts-monthly";
           const stampKey = "barravento-read-stamp:{escape(article.slug)}";
           const slug = "{escape(article.slug)}";
           const now = Date.now();
           const cooldown = 30 * 60 * 1000;
+          const monthKey = new Date(now).toISOString().slice(0, 7);
 
           let lastRead = 0;
           try {{
@@ -4181,8 +4212,19 @@ def render_article_page(article: Article) -> str:
             counts = {{}};
           }}
 
+          let monthlyCounts = {{}};
+          try {{
+            monthlyCounts = JSON.parse(localStorage.getItem(monthlyStorageKey) || "{{}}");
+          }} catch (error) {{
+            monthlyCounts = {{}};
+          }}
+
           counts[slug] = Number(counts[slug] || 0) + 1;
+          const currentMonth = monthlyCounts[monthKey] && typeof monthlyCounts[monthKey] === "object" ? monthlyCounts[monthKey] : {{}};
+          currentMonth[slug] = Number(currentMonth[slug] || 0) + 1;
+          monthlyCounts[monthKey] = currentMonth;
           localStorage.setItem(storageKey, JSON.stringify(counts));
+          localStorage.setItem(monthlyStorageKey, JSON.stringify(monthlyCounts));
           localStorage.setItem(stampKey, String(now));
         }})();
       </script>"""
@@ -4400,14 +4442,8 @@ def build_site() -> list[Article]:
         shutil.copy2(SITE_BRAND_FONT_SOURCE, ASSETS_DIR / SITE_BRAND_FONT_FILE)
     process_input_documents()
 
-    articles = [
-        extract_article(docx_file)
-        for docx_file in sorted(
-            PROCESSED_DIR.glob("*.docx"),
-            key=lambda item: item.stat().st_mtime,
-            reverse=True,
-        )
-    ]
+    articles = [extract_article(docx_file) for docx_file in PROCESSED_DIR.glob("*.docx")]
+    articles.sort(key=lambda item: item.published_at, reverse=True)
 
     clear_stale_directories(ARTICLES_DIR, {article.slug for article in articles})
     clear_stale_directories(CATEGORY_DIR, {slugify(category) for category in CATEGORY_OPTIONS})
