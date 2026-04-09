@@ -1,43 +1,124 @@
 {
   "articles": {
-    "2-o-sobrevivente": {
-      "views": 24,
-      "pdf_downloads": 6,
-      "updated_at": "2026-03-30T16:28:46",
+    "diala-tica-da-dependaancia-ruy-mauro-marini-revista-barra-vento-2-0": {
+      "views": 3,
+      "pdf_downloads": 0,
+      "updated_at": "2026-04-03T00:50:43",
       "daily": {
-        "2026-03-27": {
-          "views": 20,
-          "pdf_downloads": 1
-        },
         "2026-03-30": {
-          "views": 4,
-          "pdf_downloads": 5
+          "views": 1,
+          "pdf_downloads": 0
+        },
+        "2026-04-03": {
+          "views": 2,
+          "pdf_downloads": 0
         }
       },
       "locations": {
-        "Local|Rede local|Desenvolvimento": 5
+        "Local|Rede local|Desenvolvimento": 3
       },
       "daily_locations": {
         "2026-03-30": {
-          "Local|Rede local|Desenvolvimento": 5
+          "Local|Rede local|Desenvolvimento": 1
+        },
+        "2026-04-03": {
+          "Local|Rede local|Desenvolvimento": 2
         }
       }
     },
-    "diala-tica-da-dependaancia-ruy-mauro-marini-revista-barra-vento-2-0": {
+    "arte-pela-arte-luka-cs-tradua-a-o-revisa-o-mt-2": {
       "views": 1,
-      "pdf_downloads": 0,
-      "updated_at": "2026-03-30T16:31:05",
+      "pdf_downloads": 2,
+      "updated_at": "2026-04-03T00:35:13",
       "daily": {
-        "2026-03-30": {
+        "2026-04-03": {
+          "views": 1,
+          "pdf_downloads": 2
+        }
+      },
+      "locations": {
+        "Local|Rede local|Desenvolvimento": 3
+      },
+      "daily_locations": {
+        "2026-04-03": {
+          "Local|Rede local|Desenvolvimento": 3
+        }
+      }
+    },
+    "arte-pela-arte-luka-cs-tradua-a-o-revisa-o-mt-12": {
+      "views": 3,
+      "pdf_downloads": 0,
+      "updated_at": "2026-04-03T00:50:02",
+      "daily": {
+        "2026-04-03": {
+          "views": 3,
+          "pdf_downloads": 0
+        }
+      },
+      "locations": {
+        "Local|Rede local|Desenvolvimento": 3
+      },
+      "daily_locations": {
+        "2026-04-03": {
+          "Local|Rede local|Desenvolvimento": 3
+        }
+      }
+    },
+    "roberto-arlt-fiesta-de-la-abolicia3n-de-la-esclavitud-mia-rcoles-14-de-mayo-de-1930-pt-br-1": {
+      "views": 12,
+      "pdf_downloads": 5,
+      "updated_at": "2026-04-09T12:03:10",
+      "daily": {
+        "2026-04-03": {
+          "views": 10,
+          "pdf_downloads": 5
+        },
+        "2026-04-08": {
+          "views": 1,
+          "pdf_downloads": 0
+        },
+        "2026-04-09": {
           "views": 1,
           "pdf_downloads": 0
         }
       },
       "locations": {
-        "Local|Rede local|Desenvolvimento": 1
+        "Local|Rede local|Desenvolvimento": 17
       },
       "daily_locations": {
-        "2026-03-30": {
+        "2026-04-03": {
+          "Local|Rede local|Desenvolvimento": 15
+        },
+        "2026-04-08": {
+          "Local|Rede local|Desenvolvimento": 1
+        },
+        "2026-04-09": {
+          "Local|Rede local|Desenvolvimento": 1
+        }
+      }
+    },
+    "nota-sobre-as-manifestaa-a-es-setembrinas": {
+      "views": 9,
+      "pdf_downloads": 1,
+      "updated_at": "2026-04-09T12:03:45",
+      "daily": {
+        "2026-04-08": {
+          "views": 8,
+          "pdf_downloads": 1
+        },
+        "2026-04-09": {
+          "views": 1,
+          "pdf_downloads": 0
+        }
+      },
+      "locations": {
+        "Local|Rede local|Desenvolvimento": 10
+      },
+      "daily_locations": {
+        "2026-04-08": {
+          "Local|Rede local|Desenvolvimento": 9
+        },
+        "2026-04-09": {
           "Local|Rede local|Desenvolvimento": 1
         }
       }

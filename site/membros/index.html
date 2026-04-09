@@ -232,7 +232,16 @@
         (() => {
           const loginForm = document.getElementById("login-form");
           const loginStatus = document.getElementById("login-status");
+          const loginEmailInput = loginForm ? loginForm.querySelector('[name="email"]') : null;
+          const loginPasswordInput = loginForm ? loginForm.querySelector('[name="password"]') : null;
           const panelPageHref = "../painel/#member-panel";
+          const resolvedPanelPageHref = (() => {
+            try {
+              return new URL(panelPageHref, window.location.href).toString();
+            } catch (_error) {
+              return "/painel/#member-panel";
+            }
+          })();
           let toastHost = null;
 
           function escapeHtml(value) {
@@ -312,8 +321,39 @@
             });
             const payload = await readJson(response);
             if (payload.authenticated) {
-              window.location.replace(panelPageHref);
+              window.location.replace(resolvedPanelPageHref);
             }
+            return payload;
+          }
+
+          function goToPanel() {
+            window.location.href = resolvedPanelPageHref;
+            window.setTimeout(() => {
+              if (window.location.href !== resolvedPanelPageHref) {
+                window.location.assign(resolvedPanelPageHref);
+              }
+            }, 40);
+            window.setTimeout(() => {
+              if (window.location.href !== resolvedPanelPageHref) {
+                window.location.replace(resolvedPanelPageHref);
+              }
+            }, 160);
+          }
+
+          async function waitForAuthenticatedSession(expectedEmail) {
+            for (let attempt = 0; attempt < 8; attempt += 1) {
+              try {
+                const payload = await fetchSession();
+                const sessionEmail = String(payload && payload.member && payload.member.email || "").trim().toLowerCase();
+                const targetEmail = String(expectedEmail || "").trim().toLowerCase();
+                if (payload && payload.authenticated && (!targetEmail || sessionEmail === targetEmail)) {
+                  return true;
+                }
+              } catch (_error) {
+              }
+              await new Promise((resolve) => window.setTimeout(resolve, 180));
+            }
+            return false;
           }
 
           if (window.location.protocol === "file:") {
@@ -330,12 +370,13 @@
             setStatus(loginStatus, "pending", "Entrando...");
             try {
               const payload = await submitJson("/api/members/login", {
-                email: loginForm.email.value.trim(),
-                password: loginForm.password.value
+                email: loginEmailInput ? loginEmailInput.value.trim() : "",
+                password: loginPasswordInput ? loginPasswordInput.value : ""
               });
               loginForm.reset();
               setStatus(loginStatus, "success", "Acesso liberado para <strong>" + escapeHtml(payload.member.name || payload.member.email) + "</strong>.");
-              window.location.assign(panelPageHref);
+              await waitForAuthenticatedSession(payload && payload.member ? payload.member.email : "");
+              goToPanel();
             } catch (error) {
               setStatus(loginStatus, "error", escapeHtml(error.message));
             }
@@ -359,6 +400,7 @@
   </div>
   <script>
     (() => {
+      const panelStateKey = "barravento-member-last-session";
       const link = document.querySelector(".topline__member-link[data-login-href][data-panel-href]");
       const state = document.querySelector(".topline__member-state");
       if (!link) {
@@ -370,13 +412,13 @@
 
       function apply(authenticated, member) {
         if (authenticated && member) {
-          link.textContent = member.name || member.email || "Membro";
+          link.textContent = member.email || "Membros";
           link.href = panelHref;
           link.classList.add("is-authenticated");
           if (state) {
             state.hidden = false;
             state.textContent = "Logado";
-            state.title = member.role_label || "";
+            state.title = member.email || member.role_label || "";
           }
           return;
         }
@@ -399,10 +441,23 @@
       fetch("/api/members/session", { credentials: "same-origin" })
         .then((response) => response.json().catch(() => ({})))
         .then((payload) => {
-          apply(Boolean(payload && payload.authenticated), payload ? payload.member : null);
+          const authenticated = Boolean(payload && payload.authenticated);
+          apply(authenticated, authenticated && payload ? payload.member : null);
+          if (!authenticated) {
+            try {
+              localStorage.removeItem(panelStateKey);
+            } catch (error) {
+              return;
+            }
+          }
         })
         .catch(() => {
           apply(false, null);
+          try {
+            localStorage.removeItem(panelStateKey);
+          } catch (error) {
+            return;
+          }
         });
     })();
   </script>

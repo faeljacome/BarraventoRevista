@@ -204,10 +204,23 @@
       <section class="section">
         <div class="container">
           <div class="article-grid article-grid--wide">
-            <div class="empty-state">
-              <h3>Sem textos publicados ainda</h3>
-              <p>Quando um artigo for marcado nesta editoria, ele aparecera automaticamente aqui.</p>
-            </div>
+<article class="article-card">
+  <a class="article-card__image" href="../../artigos/nota-sobre-as-manifestaa-a-es-setembrinas/">
+    <img src="../../uploads/nota-sobre-as-manifestaa-a-es-setembrinas-1775671862461.png" alt="celular.fw">
+  </a>
+  <div class="article-card__body">
+    <div class="category-badges">
+  <a class="category-badge" href="../../categorias/editoriais/">Editoriais</a><a class="category-badge" href="../../categorias/entrevistas/">Entrevistas</a><a class="category-badge" href="../../categorias/politica-e-critica-economica/">Política e Crítica Econômica</a><a class="category-badge" href="../../categorias/ideologia-arte-e-cultura/">Ideologia, Arte e Cultura</a><a class="category-badge" href="../../categorias/traducoes/">Traduções</a><a class="category-badge" href="../../categorias/teoria-em-movimento/">Teoria em Movimento</a><a class="category-badge" href="../../categorias/textos-literarios/">Textos literários</a>
+</div>
+    <div class="meta-row">
+      <span>08 de abril de 2026</span>
+      <span>10 min</span>
+    </div>
+    <h3><a href="../../artigos/nota-sobre-as-manifestaa-a-es-setembrinas/">Nota sobre as manifestações setembrinas</a></h3>
+    <p>Em 2022, notávamos o declínio do último grande ciclo de manifestações de esquerda no Brasil, o “Fora Bolsonaro”. Em uma plenária de balanço, envolvendo diversos partidos políticos e movimentos sociais, abri minha fala com...</p>
+    <a class="article-card__link" href="../../artigos/nota-sobre-as-manifestaa-a-es-setembrinas/">Ler texto</a>
+  </div>
+</article>
           </div>
         </div>
       </section>
@@ -228,6 +241,7 @@
   </div>
   <script>
     (() => {
+      const panelStateKey = "barravento-member-last-session";
       const link = document.querySelector(".topline__member-link[data-login-href][data-panel-href]");
       const state = document.querySelector(".topline__member-state");
       if (!link) {
@@ -239,13 +253,13 @@
 
       function apply(authenticated, member) {
         if (authenticated && member) {
-          link.textContent = member.name || member.email || "Membro";
+          link.textContent = member.email || "Membros";
           link.href = panelHref;
           link.classList.add("is-authenticated");
           if (state) {
             state.hidden = false;
             state.textContent = "Logado";
-            state.title = member.role_label || "";
+            state.title = member.email || member.role_label || "";
           }
           return;
         }
@@ -268,10 +282,23 @@
       fetch("/api/members/session", { credentials: "same-origin" })
         .then((response) => response.json().catch(() => ({})))
         .then((payload) => {
-          apply(Boolean(payload && payload.authenticated), payload ? payload.member : null);
+          const authenticated = Boolean(payload && payload.authenticated);
+          apply(authenticated, authenticated && payload ? payload.member : null);
+          if (!authenticated) {
+            try {
+              localStorage.removeItem(panelStateKey);
+            } catch (error) {
+              return;
+            }
+          }
         })
         .catch(() => {
           apply(false, null);
+          try {
+            localStorage.removeItem(panelStateKey);
+          } catch (error) {
+            return;
+          }
         });
     })();
   </script>

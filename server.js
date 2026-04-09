@@ -18,13 +18,18 @@ const INPUT_DIR = path.join(ROOT, "conteudo", "entrada-docx");
 const UPLOADS_DIR = path.join(SITE_DIR, "uploads");
 const DATA_DIR = path.join(ROOT, "dados");
 const MEMBERS_FILE = path.join(DATA_DIR, "membros.json");
+const WHO_FILE = path.join(DATA_DIR, "quem-somos.json");
 const NOTICES_FILE = path.join(DATA_DIR, "recados.json");
 const STATS_FILE = path.join(DATA_DIR, "estatisticas.json");
 const SUBMISSIONS_FILE = path.join(DATA_DIR, "submissoes.json");
 const SUBMISSIONS_DIR = path.join(DATA_DIR, "submissoes");
 const DOCX_IMPORTS_DIR = path.join(DATA_DIR, "docx-imports");
+const LOGS_DIR = path.join(DATA_DIR, "logs");
+const MEMBER_LOG_FILE = path.join(LOGS_DIR, "membros.txt");
+const MEMBER_PHOTO_DIR = path.join(UPLOADS_DIR, "membros");
 const DOCX_IMPORT_TTL_MS = 1000 * 60 * 60 * 24;
 const NOTICE_RETENTION_MS = 1000 * 60 * 60 * 24 * 60;
+const MEMBER_LOG_RETENTION_MS = 1000 * 60 * 60 * 24 * 92;
 const DASHBOARD_HISTORY_DAYS = 365;
 const GEO_LOOKUP_URL = "https://ipwho.is/";
 const GEO_LOOKUP_TIMEOUT_MS = 2500;
@@ -66,6 +71,11 @@ const ROLE_LABELS = {
   reviewer: "Revisor"
 };
 const DEFAULT_MEMBER_ROLE = "reviewer";
+const MEMBER_OFFICE_OPTIONS = [
+  "Opcao A",
+  "Opcao B",
+  "Opcao C"
+];
 
 const sessions = new Map();
 const rateLimitBuckets = new Map();
@@ -83,6 +93,14 @@ const uploadArticle = multer({
     fileSize: MULTIPART_FILE_MAX_BYTES,
     files: 2,
     fields: 30
+  }
+});
+const uploadProfilePhoto = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: IMAGE_MAX_BYTES,
+    files: 1,
+    fields: 10
   }
 });
 const app = express();
@@ -115,7 +133,13 @@ app.use((req, res, next) => {
   if (secureRequest) {
     res.setHeader("Strict-Transport-Security", "max-age=15552000; includeSubDomains");
   }
-  if (req.path.startsWith("/api/members/") || req.path.startsWith("/membros/previas/")) {
+  if (
+    req.path.startsWith("/api/members/") ||
+    req.path.startsWith("/membros/previas/") ||
+    req.path.startsWith("/painel/") ||
+    req.path === "/publicar.html" ||
+    req.path.startsWith("/membros/")
+  ) {
     res.setHeader("Cache-Control", "no-store");
   }
   next();
@@ -123,6 +147,78 @@ app.use((req, res, next) => {
 
 function ensureDir(dirPath) {
   fs.mkdirSync(dirPath, { recursive: true });
+}
+
+function sanitizeLogValue(value, fallback = "-") {
+  const text = String(value ?? "")
+    .replace(/[\r\n\t|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || fallback;
+}
+
+function memberLogStamp(value = Date.now()) {
+  return new Date(value).toISOString().slice(0, 19);
+}
+
+function pruneMemberLogFile() {
+  if (!fs.existsSync(MEMBER_LOG_FILE)) {
+    return;
+  }
+  const cutoff = Date.now() - MEMBER_LOG_RETENTION_MS;
+  const lines = fs.readFileSync(MEMBER_LOG_FILE, "utf8").split(/\r?\n/);
+  const kept = lines.filter((line) => {
+    const stamp = String(line || "").slice(0, 19);
+    const parsed = Date.parse(stamp);
+    if (!Number.isFinite(parsed)) {
+      return false;
+    }
+    return parsed >= cutoff;
+  });
+  fs.writeFileSync(MEMBER_LOG_FILE, kept.length ? `${kept.join("\n")}\n` : "", "utf8");
+}
+
+function clientIpForLog(req) {
+  return sanitizeLogValue(normalizeClientIp(req?.headers?.["x-forwarded-for"] || req?.ip || req?.socket?.remoteAddress || ""), "-");
+}
+
+function appendMemberLog(kind, message, { req = null, member = null } = {}) {
+  ensureDir(LOGS_DIR);
+  pruneMemberLogFile();
+  const payload = [
+    memberLogStamp(),
+    sanitizeLogValue(kind),
+    sanitizeLogValue(member?.email, "anon"),
+    sanitizeLogValue(member?.role_label || member?.role, "-"),
+    sanitizeLogValue(message),
+    clientIpForLog(req)
+  ].join(" | ");
+  fs.appendFileSync(MEMBER_LOG_FILE, `${payload}\n`, "utf8");
+}
+
+function readMemberLogs(limit = 200) {
+  ensureDir(LOGS_DIR);
+  pruneMemberLogFile();
+  if (!fs.existsSync(MEMBER_LOG_FILE)) {
+    return [];
+  }
+  return fs.readFileSync(MEMBER_LOG_FILE, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .slice(-Math.max(1, Math.min(Number(limit) || 200, 500)))
+    .reverse()
+    .map((line, index) => {
+      const [at = "", kind = "", email = "", role = "", message = "", ip = ""] = String(line).split(" | ");
+      return {
+        id: `${at}-${index}`,
+        at,
+        kind,
+        email,
+        role,
+        message,
+        ip
+      };
+    });
 }
 
 function readJsonFile(filePath, fallback) {
@@ -142,7 +238,16 @@ function writeJsonFile(filePath, payload) {
 }
 
 function normalizeEmail(value) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "").trim().normalize("NFC").toLowerCase();
+}
+
+function authorKey(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function validateEmail(value) {
@@ -332,6 +437,60 @@ function normalizeMemberRole(value) {
   return ROLE_LABELS[role] ? role : DEFAULT_MEMBER_ROLE;
 }
 
+function normalizeMemberOffice(value) {
+  const office = String(value || "").trim();
+  return MEMBER_OFFICE_OPTIONS.includes(office) ? office : MEMBER_OFFICE_OPTIONS[0];
+}
+
+function profileSlugForMember(member) {
+  const explicit = slugify(String(member?.profile_slug || "").trim());
+  if (explicit && explicit !== "artigo") {
+    return explicit;
+  }
+  const emailLocal = slugify(normalizeEmail(member?.email).split("@")[0] || "membro");
+  const base = slugify(String(member?.name || "").trim() || emailLocal);
+  if (emailLocal && !base.includes(emailLocal)) {
+    return slugify(`${base}-${emailLocal}`);
+  }
+  return base;
+}
+
+function normalizeProfileText(value, { max = 4000, fallback = "" } = {}) {
+  const text = String(value || "").replace(/\r\n/g, "\n").trim();
+  return text ? text.slice(0, max) : fallback;
+}
+
+function readWhoContent() {
+  const raw = readJsonFile(WHO_FILE, {});
+  return {
+    title: normalizeProfileText(raw.title, { max: 120, fallback: "Quem Somos" }),
+    summary: normalizeProfileText(raw.summary, {
+      max: 320,
+      fallback: "Pagina propria para apresentar a revista, a linha editorial e a equipe responsavel."
+    }),
+    body: normalizeProfileText(raw.body, {
+      max: 12000,
+      fallback: "Esta pagina foi preparada para receber a apresentacao institucional da Revista Barravento."
+    }),
+    updated_at: String(raw.updated_at || "").trim()
+  };
+}
+
+function writeWhoContent(payload) {
+  writeJsonFile(WHO_FILE, {
+    title: normalizeProfileText(payload.title, { max: 120, fallback: "Quem Somos" }),
+    summary: normalizeProfileText(payload.summary, {
+      max: 320,
+      fallback: "Pagina propria para apresentar a revista, a linha editorial e a equipe responsavel."
+    }),
+    body: normalizeProfileText(payload.body, {
+      max: 12000,
+      fallback: "Esta pagina foi preparada para receber a apresentacao institucional da Revista Barravento."
+    }),
+    updated_at: new Date().toISOString().slice(0, 19)
+  });
+}
+
 function publicMemberPayload(member) {
   const role = normalizeMemberRole(member.role);
   return {
@@ -341,7 +500,12 @@ function publicMemberPayload(member) {
     role,
     role_label: ROLE_LABELS[role],
     approved: Boolean(member.approved),
-    approved_at: String(member.approved_at || "").trim()
+    approved_at: String(member.approved_at || "").trim(),
+    profile_slug: profileSlugForMember(member),
+    editorial_role: normalizeMemberOffice(member.editorial_role),
+    education: normalizeProfileText(member.education, { max: 500 }),
+    photo_url: String(member.photo_url || "").trim(),
+    profile_published: Boolean(member.profile_published)
   };
 }
 
@@ -369,7 +533,14 @@ function readMembers() {
       created_at: String(value.created_at || "").trim(),
       role: normalizeMemberRole(value.role),
       approved: value.approved === undefined ? true : String(value.approved).trim().toLowerCase() !== "false",
-      approved_at: String(value.approved_at || "").trim()
+      approved_at: String(value.approved_at || "").trim(),
+      profile_slug: profileSlugForMember(value),
+      editorial_role: normalizeMemberOffice(value.editorial_role),
+      education: normalizeProfileText(value.education, { max: 500 }),
+      photo_url: String(value.photo_url || "").trim(),
+      profile_published: value.profile_published === undefined
+        ? Boolean(String(value.name || "").trim())
+        : String(value.profile_published).trim().toLowerCase() !== "false"
     };
   }
   return normalized;
@@ -384,6 +555,13 @@ function pendingMemberRegistrations() {
     .filter((member) => !member.approved)
     .map((member) => publicMemberPayload(member))
     .sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")));
+}
+
+function approvedMemberDirectory() {
+  return Object.values(readMembers())
+    .filter((member) => member.approved)
+    .map((member) => publicMemberPayload(member))
+    .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), "pt-BR"));
 }
 
 function approveMemberRegistration(email) {
@@ -472,6 +650,14 @@ function parseCsvList(raw) {
     .filter((item, index, list) => list.indexOf(item) === index);
 }
 
+function arrayFieldValues(raw) {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+  const value = String(raw || "").trim();
+  return value ? [value] : [];
+}
+
 function normalizeHashtags(values) {
   return values
     .map((value) => String(value || "").trim().replace(/^#/, ""))
@@ -479,6 +665,88 @@ function normalizeHashtags(values) {
     .filter(Boolean)
     .map((value) => `#${value}`)
     .filter((item, index, list) => list.indexOf(item) === index);
+}
+
+function saveMemberPhoto(member, file) {
+  if (!file || !file.buffer?.length) {
+    return String(member?.photo_url || "").trim();
+  }
+  validateImageFile(file, { required: true });
+  ensureDir(MEMBER_PHOTO_DIR);
+  const suffix = sanitizeImageName(file.originalname);
+  const base = profileSlugForMember(member || {});
+  const filename = `${base}-${Date.now()}${suffix}`;
+  fs.writeFileSync(path.join(MEMBER_PHOTO_DIR, filename), file.buffer);
+  const previous = String(member?.photo_url || "").trim();
+  if (previous.startsWith("/uploads/membros/")) {
+    const previousName = path.basename(previous);
+    const previousPath = path.join(MEMBER_PHOTO_DIR, previousName);
+    if (fs.existsSync(previousPath)) {
+      deleteIfExists(previousPath);
+    }
+  }
+  return `/uploads/membros/${filename}`;
+}
+
+function parseAuthorMembers(raw) {
+  const selected = arrayFieldValues(raw);
+  if (!selected.length) {
+    return [];
+  }
+  const members = readMembers();
+  const items = [];
+  for (const emailValue of selected) {
+    const email = normalizeEmail(emailValue);
+    const member = members[email];
+    if (!member || !member.approved) {
+      continue;
+    }
+    const payload = publicMemberPayload(member);
+    items.push({
+      email: payload.email,
+      name: payload.name || payload.email,
+      profile_slug: payload.profile_slug
+    });
+  }
+  return items.filter((item, index, list) => list.findIndex((entry) => entry.email === item.email) === index);
+}
+
+function resolveArticleAuthors(body) {
+  const authorMembers = parseAuthorMembers(body.author_members);
+  const authorText = String(body.author || "").trim();
+  const parts = [];
+  const knownKeys = new Set();
+  if (authorText) {
+    for (const piece of authorText.split(/[;,]/)) {
+      const cleaned = String(piece || "").trim();
+      const pieceKey = authorKey(cleaned);
+      if (!cleaned || knownKeys.has(pieceKey)) {
+        continue;
+      }
+      parts.push(cleaned);
+      knownKeys.add(pieceKey);
+    }
+  }
+  for (const item of authorMembers) {
+    const name = String(item?.name || "").trim();
+    if (!name) {
+      continue;
+    }
+    const nameKey = authorKey(name);
+    if (!knownKeys.has(nameKey)) {
+      parts.push(name);
+      knownKeys.add(nameKey);
+    }
+  }
+  return {
+    author: parts.join(", "),
+    author_text: authorText,
+    author_members: authorMembers
+  };
+}
+
+function createArticleId() {
+  return crypto.randomBytes(10).toString("hex");
 }
 
 function arrayValue(raw) {
@@ -1209,25 +1477,84 @@ function formatLongDate(dateLike) {
   return `${String(moment.getDate()).padStart(2, "0")} de ${months[moment.getMonth()]} de ${moment.getFullYear()}`;
 }
 
+let cachedPythonCommand = null;
+
+function pythonCommandCandidates() {
+  const preferredPython = String(process.env.PYTHON_EXECUTABLE || "").trim();
+  const commands = [];
+  const seen = new Set();
+
+  function pushCommand(command, args) {
+    const key = `${command} ${args.join(" ")}`;
+    if (!command || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    commands.push([command, args]);
+  }
+
+  if (preferredPython) {
+    pushCommand(preferredPython, []);
+  }
+
+  if (process.platform === "win32") {
+    pushCommand("py", ["-3"]);
+    pushCommand("python", []);
+    pushCommand("python3", []);
+  } else {
+    pushCommand("python3", []);
+    pushCommand("python", []);
+  }
+
+  return commands;
+}
+
+function resolvePythonCommand() {
+  if (cachedPythonCommand) {
+    return cachedPythonCommand;
+  }
+
+  for (const [command, baseArgs] of pythonCommandCandidates()) {
+    const result = spawnSync(command, [...baseArgs, "--version"], {
+      cwd: ROOT,
+      encoding: "utf8",
+      env: process.env
+    });
+    if (!result.error && result.status === 0) {
+      cachedPythonCommand = [command, baseArgs];
+      return cachedPythonCommand;
+    }
+  }
+
+  return null;
+}
+
 function runBuildScript() {
-  const vendorDir = PYTHON_VENDOR_DIR;
   const buildScript = process.platform === "win32" ? "scripts\\gerar_site.py" : "scripts/gerar_site.py";
-  const embeddedBootstrap = [
-    "import runpy, sys",
-    `sys.path.insert(0, r"${vendorDir.replace(/\\/g, "\\\\")}")`,
-    `runpy.run_path(r"${path.join(ROOT, buildScript).replace(/\\/g, "\\\\")}", run_name="__main__")`
-  ].join("; ");
-  const commands = process.platform === "win32"
-    ? [
-        ["python", [buildScript]],
-        ["python3", [buildScript]],
-        ["py", ["-3", buildScript]],
-        ["C:\\Program Files\\FormatFactory\\FFModules\\python\\python.exe", ["-c", embeddedBootstrap]]
-      ]
-    : [
-        ["python3", [buildScript]],
-        ["python", [buildScript]]
-      ];
+  const commands = [];
+  const seen = new Set();
+
+  function pushCommand(command, args) {
+    const key = `${command} ${args.join(" ")}`;
+    if (!command || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    commands.push([command, args]);
+  }
+
+  const resolvedPython = resolvePythonCommand();
+  if (resolvedPython) {
+    const [command, baseArgs] = resolvedPython;
+    pushCommand(command, [...baseArgs, buildScript]);
+  } else if (process.platform === "win32") {
+    pushCommand("py", ["-3", buildScript]);
+    pushCommand("python", [buildScript]);
+    pushCommand("python3", [buildScript]);
+  } else {
+    pushCommand("python3", [buildScript]);
+    pushCommand("python", [buildScript]);
+  }
 
   let lastError = null;
   for (const [command, args] of commands) {
@@ -1235,8 +1562,7 @@ function runBuildScript() {
       cwd: ROOT,
       encoding: "utf8",
       env: {
-        ...process.env,
-        PYTHONPATH: vendorDir + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : "")
+        ...process.env
       }
     });
     if (!result.error && result.status === 0) {
@@ -1341,6 +1667,7 @@ function createArticle(req) {
 
   const title = requireArticleTitle(req.body.title);
   const categories = parseCategories(req.body.categories);
+  const authors = resolveArticleAuthors(req.body);
   const baseSlug = slugify(path.parse(sanitizeDocxName(docx.originalname)).name);
   const slug = uniqueArticleSlug(baseSlug);
   const docxPath = articleDocxPath(slug);
@@ -1354,8 +1681,11 @@ function createArticle(req) {
   const bodyBlocks = parseBodyBlocksField(req.body.body_blocks_json);
   const nowStamp = new Date().toISOString().slice(0, 19);
   const metadata = {
+    article_id: String(req.body.article_id || createArticleId()).trim(),
     title,
-    author: String(req.body.author || "").trim(),
+    author: authors.author,
+    author_text: authors.author_text,
+    author_members: authors.author_members,
     summary: String(req.body.summary || "").trim(),
     categories,
     tags: parseCsvList(req.body.tags),
@@ -1399,7 +1729,8 @@ function editArticle(req) {
   const currentSidecar = readJsonFile(sidecarPath(docxPath), {});
   const categories = parseCategories(req.body.categories);
   const title = requireArticleTitle(req.body.title);
-  const author = String(req.body.author || "").trim();
+  const authors = resolveArticleAuthors(req.body);
+  const author = authors.author;
   const summary = String(req.body.summary || "").trim();
   const tags = parseCsvList(req.body.tags);
   const hashtags = normalizeHashtags(parseCsvList(req.body.hashtags));
@@ -1430,6 +1761,7 @@ function editArticle(req) {
   const metadataChanged = (
     title !== String(currentArticle.title || "") ||
     author !== String(currentArticle.author || "") ||
+    JSON.stringify(authors.author_members || []) !== JSON.stringify(currentArticle.author_members || []) ||
     summary !== String(currentArticle.summary || "") ||
     bodyChanged ||
     JSON.stringify(categories) !== JSON.stringify(currentArticle.categories || []) ||
@@ -1458,8 +1790,11 @@ function editArticle(req) {
   }
 
   const metadata = {
+    article_id: String(currentSidecar.article_id || currentArticle.article_id || createArticleId()).trim(),
     title,
     author,
+    author_text: authors.author_text,
+    author_members: authors.author_members,
     summary,
     categories,
     tags,
@@ -1486,6 +1821,7 @@ function editArticle(req) {
 
   fs.writeFileSync(sidecarPath(docxPath), JSON.stringify(metadata, null, 2), "utf8");
   setTimestamp(docxPath);
+  deleteIfExists(path.join(SITE_DIR, "pdfs", `${slug}.pdf`));
   runBuildScript();
   return buildResponse(slug, title || currentArticle.title, "Arquivo atualizado com sucesso.");
 }
@@ -1843,6 +2179,7 @@ function createArticleSubmission(req, member) {
   const image = validateImageFile(req.files?.image?.[0], { required: true });
   const title = requireArticleTitle(req.body.title);
   const categories = parseCategories(req.body.categories);
+  const authors = resolveArticleAuthors(req.body);
   const body = normalizeEditorValue(req.body.body);
   const bodyHtml = sanitizeArticleHtml(req.body.body_html);
   const bodyBlocks = parseBodyBlocksField(req.body.body_blocks_json);
@@ -1851,8 +2188,11 @@ function createArticleSubmission(req, member) {
     throw createError(400, "Escreva o corpo do texto antes de publicar.");
   }
   const payload = {
+    article_id: createArticleId(),
     title,
-    author: String(req.body.author || "").trim(),
+    author: authors.author,
+    author_text: authors.author_text,
+    author_members: authors.author_members,
     summary: String(req.body.summary || "").trim(),
     body,
     body_html: bodyHtml,
@@ -1898,7 +2238,8 @@ function editArticleSubmission(req, member) {
   const currentSidecar = readJsonFile(sidecarPath(docxPath), {});
   const categories = parseCategories(req.body.categories);
   const title = requireArticleTitle(req.body.title);
-  const author = String(req.body.author || "").trim();
+  const authors = resolveArticleAuthors(req.body);
+  const author = authors.author;
   const summary = String(req.body.summary || "").trim();
   const tags = parseCsvList(req.body.tags);
   const hashtags = normalizeHashtags(parseCsvList(req.body.hashtags));
@@ -1928,6 +2269,7 @@ function editArticleSubmission(req, member) {
   const metadataChanged = (
     title !== String(currentArticle.title || "") ||
     author !== String(currentArticle.author || "") ||
+    JSON.stringify(authors.author_members || []) !== JSON.stringify(currentArticle.author_members || []) ||
     summary !== String(currentArticle.summary || "") ||
     bodyChanged ||
     JSON.stringify(categories) !== JSON.stringify(currentArticle.categories || []) ||
@@ -1943,9 +2285,12 @@ function editArticleSubmission(req, member) {
     kind: "edit",
     member,
     payload: {
+      article_id: String(currentSidecar.article_id || currentArticle.article_id || createArticleId()).trim(),
       slug,
       title,
       author,
+      author_text: authors.author_text,
+      author_members: authors.author_members,
       summary,
       body,
       body_html: bodyHtml,
@@ -2004,8 +2349,10 @@ function approveSubmissionItem(submissionId) {
     }
     result = createArticle({
       body: {
+        article_id: submission.article_id || "",
         title: submission.title || "",
-        author: submission.author || "",
+        author: submission.author_text || submission.author || "",
+        author_members: submission.author_members || [],
         summary: submission.summary || "",
         body: submission.body || "",
         body_html: submission.body_html || "",
@@ -2032,8 +2379,10 @@ function approveSubmissionItem(submissionId) {
     result = editArticle({
       body: {
         slug: submission.slug || "",
+        article_id: submission.article_id || "",
         title: submission.title || "",
-        author: submission.author || "",
+        author: submission.author_text || submission.author || "",
+        author_members: submission.author_members || [],
         summary: submission.summary || "",
         body: submission.body || "",
         body_html: submission.body_html || "",
@@ -2480,6 +2829,72 @@ app.get("/api/members/session", (req, res) => {
   });
 });
 
+app.get("/api/members/profile", requireMember, (req, res) => {
+  const members = readMembers();
+  const current = members[normalizeEmail(req.member.email)] || {};
+  res.json({
+    ok: true,
+    member: publicMemberPayload(current),
+    directory: approvedMemberDirectory(),
+    office_options: MEMBER_OFFICE_OPTIONS,
+    who: req.member.role === "admin" ? readWhoContent() : null
+  });
+});
+
+app.post("/api/members/profile", requireMember, memberWriteRateLimit, uploadProfilePhoto.single("photo"), (req, res, next) => {
+  try {
+    const members = readMembers();
+    const email = normalizeEmail(req.member.email);
+    const current = members[email];
+    if (!current) {
+      throw createError(404, "Membro nao encontrado.");
+    }
+    const nextName = validateName(req.body.name || current.name);
+    const nextMember = {
+      ...current,
+      name: nextName,
+      profile_slug: profileSlugForMember({ ...current, name: nextName, email }),
+      editorial_role: normalizeMemberOffice(req.body.editorial_role),
+      education: normalizeProfileText(req.body.education, { max: 500 }),
+      profile_published: true
+    };
+    if (req.file && req.file.buffer?.length) {
+      nextMember.photo_url = saveMemberPhoto(nextMember, req.file);
+    }
+    members[email] = nextMember;
+    writeMembers(members);
+    runBuildScript();
+    appendMemberLog("profile-update", `atualizou perfil publico ${email}`, { req, member: publicMemberPayload(nextMember) });
+    res.json({
+      ok: true,
+      message: "Perfil atualizado com sucesso.",
+      member: publicMemberPayload(nextMember),
+      directory: approvedMemberDirectory()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/members/who", requireMember, requireAdmin, memberWriteRateLimit, (req, res, next) => {
+  try {
+    writeWhoContent({
+      title: req.body.title,
+      summary: req.body.summary,
+      body: req.body.body
+    });
+    runBuildScript();
+    appendMemberLog("who-update", "atualizou a pagina Quem Somos", { req, member: req.member });
+    res.json({
+      ok: true,
+      message: "Pagina Quem Somos atualizada com sucesso.",
+      who: readWhoContent()
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/members/register", requireMember, requireAdmin, registerRateLimit, (req, res, next) => {
   try {
     const name = validateName(req.body.name);
@@ -2500,6 +2915,7 @@ app.post("/api/members/register", requireMember, requireAdmin, registerRateLimit
       approved_at: ""
     };
     writeMembers(members);
+    appendMemberLog("member-create", `novo membro ${email} (${ROLE_LABELS[role] || role})`, { req, member: req.member });
     res.status(201).json({
       ok: true,
       message: "Cadastro enviado para aprovacao do Conselho Editorial.",
@@ -2528,6 +2944,7 @@ app.post("/api/members/login", authRateLimit, (req, res, next) => {
       path: "/",
       maxAge: SESSION_MAX_AGE
     });
+    appendMemberLog("login", "acesso ao painel", { req, member: publicMemberPayload(member) });
     res.json({
       ok: true,
       message: "Login realizado com sucesso.",
@@ -2540,6 +2957,7 @@ app.post("/api/members/login", authRateLimit, (req, res, next) => {
 
 app.post("/api/members/logout", (req, res) => {
   const token = req.cookies[SESSION_COOKIE_NAME];
+  const member = currentMember(req);
   if (token) {
     sessions.delete(token);
   }
@@ -2550,6 +2968,9 @@ app.post("/api/members/logout", (req, res) => {
     secure: secureCookie,
     path: "/"
   });
+  if (member) {
+    appendMemberLog("logout", "saida do painel", { req, member });
+  }
   res.json({
     ok: true,
     authenticated: false,
@@ -2567,6 +2988,7 @@ app.get("/api/members/notices", requireMember, (req, res) => {
 app.post("/api/members/notices", requireMember, memberWriteRateLimit, (req, res, next) => {
   try {
     const item = addNotice(req.member, req.body.message);
+    appendMemberLog("notice", "publicou um recado", { req, member: req.member });
     res.status(201).json({
       ok: true,
       message: "Recado publicado com sucesso.",
@@ -2597,6 +3019,21 @@ app.get("/api/members/dashboard", requireMember, (req, res) => {
   });
 });
 
+app.get("/api/members/articles", requireMember, (req, res) => {
+  res.json({
+    ok: true,
+    items: loadUploadPageArticles()
+  });
+});
+
+app.get("/api/members/logs", requireMember, requireAdmin, (req, res) => {
+  const limit = Math.max(20, Math.min(Number(req.query.limit) || 200, 500));
+  res.json({
+    ok: true,
+    items: readMemberLogs(limit)
+  });
+});
+
 app.get("/api/members/approvals", requireMember, requireAdmin, (req, res) => {
   const submissions = pendingSubmissionItems().map((item) => ({
     id: String(item.id || "").trim(),
@@ -2621,6 +3058,7 @@ app.get("/api/members/approvals", requireMember, requireAdmin, (req, res) => {
 app.post("/api/members/approvals/registrations/approve", requireMember, requireAdmin, approvalRateLimit, (req, res, next) => {
   try {
     const approved = approveMemberRegistration(req.body.email);
+    appendMemberLog("member-approve", `aprovou cadastro de ${approved.email}`, { req, member: req.member });
     res.json({
       ok: true,
       message: "Cadastro aprovado com sucesso.",
@@ -2639,6 +3077,7 @@ app.post("/api/members/approvals/submissions/approve", requireMember, requireAdm
     const approvedItem = items.find((item) => String(item.id || "") === String(req.body.id || ""));
     if (approvedItem) {
       addSubmissionOutcomeNotice(approvedItem, "approved");
+      appendMemberLog("approval", `aprovou ${approvedItem.kind || "solicitacao"}: ${approvedItem.title || approvedItem.slug || approvedItem.id}`, { req, member: req.member });
     }
     res.json({
       ok: true,
@@ -2662,6 +3101,7 @@ app.post("/api/members/approvals/submissions/reject", requireMember, requireAdmi
     const rejectedItem = items.find((item) => String(item.id || "") === String(req.body.id || ""));
     if (rejectedItem) {
       addSubmissionOutcomeNotice(rejectedItem, "rejected", reason);
+      appendMemberLog("rejection", `recusou ${rejectedItem.kind || "solicitacao"}: ${rejectedItem.title || rejectedItem.slug || rejectedItem.id}`, { req, member: req.member });
     }
     res.json({
       ok: true,
@@ -2688,6 +3128,7 @@ app.get("/membros/previas/submissoes/:id", requireMember, requireAdmin, (req, re
     if (!fs.existsSync(previewPath)) {
       throw createError(404, "Arquivo de previa nao encontrado.");
     }
+    appendMemberLog("preview-submission", `abriu previa da submissao ${submissionId}`, { req, member: req.member });
     res.sendFile(previewPath);
   } catch (error) {
     next(error);
@@ -2706,6 +3147,7 @@ app.get("/membros/previas/submissoes/:id/arquivo/:filename", requireMember, requ
     if (!fs.existsSync(targetPath)) {
       throw createError(404, "Arquivo temporario da submissao nao encontrado.");
     }
+    appendMemberLog("preview-file", `abriu arquivo temporario ${filename} da submissao ${submissionId}`, { req, member: req.member });
     res.sendFile(targetPath);
   } catch (error) {
     next(error);
@@ -2716,6 +3158,7 @@ app.post("/api/docx-import", requireMember, docxImportRateLimit, uploadDocx.sing
   try {
     const imported = saveImportedDocx(req.file);
     const payload = await previewDocxFile(req.file);
+    appendMemberLog("docx-import", `importou DOCX: ${imported.originalname}`, { req, member: req.member });
     res.json({
       ...payload,
       import_id: imported.import_id,
@@ -2730,6 +3173,7 @@ app.post("/api/docx-preview", requireMember, docxImportRateLimit, uploadDocx.sin
   try {
     const imported = saveImportedDocx(req.file);
     const payload = await previewDocxFile(req.file);
+    appendMemberLog("docx-preview", `gerou previa DOCX: ${imported.originalname}`, { req, member: req.member });
     res.json({
       ...payload,
       import_id: imported.import_id,
@@ -2746,6 +3190,7 @@ app.post("/api/upload", requireMember, memberWriteRateLimit, uploadArticle.field
 ]), (req, res, next) => {
   try {
     const payload = createArticleSubmission(req, req.member);
+    appendMemberLog("submit-create", `enviou novo texto: ${payload.title || req.body.title || "sem titulo"}`, { req, member: req.member });
     res.status(202).json(payload);
   } catch (error) {
     next(error);
@@ -2758,6 +3203,7 @@ app.post("/api/edit", requireMember, memberWriteRateLimit, uploadArticle.fields(
 ]), (req, res, next) => {
   try {
     const payload = editArticleSubmission(req, req.member);
+    appendMemberLog("submit-edit", `enviou edicao: ${req.body.slug || req.body.title || "sem referencia"}`, { req, member: req.member });
     res.status(202).json(payload);
   } catch (error) {
     next(error);
@@ -2767,6 +3213,7 @@ app.post("/api/edit", requireMember, memberWriteRateLimit, uploadArticle.fields(
 app.post("/api/delete", requireMember, memberWriteRateLimit, (req, res, next) => {
   try {
     const payload = deleteArticleSubmission(req, req.member);
+    appendMemberLog("submit-delete", `solicitou exclusao: ${req.body.slug || "sem slug"}`, { req, member: req.member });
     res.status(202).json(payload);
   } catch (error) {
     next(error);

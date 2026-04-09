@@ -1,0 +1,113 @@
+2026-04-03T01:36:08 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-03T03:38:58 | logout | revistabarravento@gmail.com | Conselho Editorial | saida do painel | 127.0.0.1
+2026-04-03T03:40:26 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-03T03:40:26 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:40:26 | read-dashboard | revistabarravento@gmail.com | Conselho Editorial | consultou o dashboard ([object Object]) | 127.0.0.1
+2026-04-03T03:40:26 | read-approvals | revistabarravento@gmail.com | Conselho Editorial | consultou a fila de aprovacoes | 127.0.0.1
+2026-04-03T03:40:26 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:40:28 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:40:33 | read-dashboard | revistabarravento@gmail.com | Conselho Editorial | consultou o dashboard ([object Object]) | 127.0.0.1
+2026-04-03T03:40:34 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:40:49 | read-approvals | revistabarravento@gmail.com | Conselho Editorial | consultou a fila de aprovacoes | 127.0.0.1
+2026-04-03T03:40:49 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:40:51 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:41:02 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:41:06 | notice | revistabarravento@gmail.com | Conselho Editorial | publicou um recado | 127.0.0.1
+2026-04-03T03:41:06 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:41:08 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:41:10 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:41:15 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:11 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:12 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:13 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:13 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:21 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:22 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:32 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:43:32 | read-dashboard | revistabarravento@gmail.com | Conselho Editorial | consultou o dashboard ([object Object]) | 127.0.0.1
+2026-04-03T03:43:32 | read-approvals | revistabarravento@gmail.com | Conselho Editorial | consultou a fila de aprovacoes | 127.0.0.1
+2026-04-03T03:43:32 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:47 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:43:47 | read-dashboard | revistabarravento@gmail.com | Conselho Editorial | consultou o dashboard ([object Object]) | 127.0.0.1
+2026-04-03T03:43:47 | read-approvals | revistabarravento@gmail.com | Conselho Editorial | consultou a fila de aprovacoes | 127.0.0.1
+2026-04-03T03:43:47 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:51 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:53 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:54 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:54 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:54 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:55 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:55 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:55 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:55 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:55 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:56 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:56 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:56 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:43:56 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:44:07 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:44:07 | read-dashboard | revistabarravento@gmail.com | Conselho Editorial | consultou o dashboard ([object Object]) | 127.0.0.1
+2026-04-03T03:44:07 | read-approvals | revistabarravento@gmail.com | Conselho Editorial | consultou a fila de aprovacoes | 127.0.0.1
+2026-04-03T03:44:07 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:44:09 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:44:10 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:44:35 | read-notices | revistabarravento@gmail.com | Conselho Editorial | consultou os recados | 127.0.0.1
+2026-04-03T03:44:35 | read-dashboard | revistabarravento@gmail.com | Conselho Editorial | consultou o dashboard ([object Object]) | 127.0.0.1
+2026-04-03T03:44:35 | read-approvals | revistabarravento@gmail.com | Conselho Editorial | consultou a fila de aprovacoes | 127.0.0.1
+2026-04-03T03:44:35 | read-logs | revistabarravento@gmail.com | Conselho Editorial | consultou os logs (200) | 127.0.0.1
+2026-04-03T03:45:13 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:02:38 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:07:37 | docx-import | revistabarravento@gmail.com | Conselho Editorial | importou DOCX: COMUNICADO DO COMITE CENTRAL_21082025 - CR - DF (1) (1).docx | 127.0.0.1
+2026-04-08T18:08:05 | docx-import | revistabarravento@gmail.com | Conselho Editorial | importou DOCX: Marxismo-ou-apologetica-nacionalista_-Erico-Sachs.docx | 127.0.0.1
+2026-04-08T18:09:03 | submit-create | revistabarravento@gmail.com | Conselho Editorial | enviou novo texto: MARXISMO OU APOLOGÉTICA NACIONALISTA?* | 127.0.0.1
+2026-04-08T18:09:11 | approval | revistabarravento@gmail.com | Conselho Editorial | aprovou create: MARXISMO OU APOLOGÉTICA NACIONALISTA?* | 127.0.0.1
+2026-04-08T18:09:57 | submit-delete | revistabarravento@gmail.com | Conselho Editorial | solicitou exclusao: marxismo-ou-apologetica-nacionalista-erico-sachs | 127.0.0.1
+2026-04-08T18:10:04 | approval | revistabarravento@gmail.com | Conselho Editorial | aprovou delete: MARXISMO OU APOLOGÉTICA NACIONALISTA?* | 127.0.0.1
+2026-04-08T18:10:21 | docx-import | revistabarravento@gmail.com | Conselho Editorial | importou DOCX: Nota sobre as manifestaÃ§Ãµes setembrinas.docx | 127.0.0.1
+2026-04-08T18:10:57 | submit-create | revistabarravento@gmail.com | Conselho Editorial | enviou novo texto: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-08T18:11:03 | approval | revistabarravento@gmail.com | Conselho Editorial | aprovou create: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-08T18:29:22 | notice | revistabarravento@gmail.com | Conselho Editorial | publicou um recado | 127.0.0.1
+2026-04-08T18:29:29 | logout | revistabarravento@gmail.com | Conselho Editorial | saida do painel | 127.0.0.1
+2026-04-08T18:29:42 | login | rmatos.plansul@mpmg.mp.br | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T18:37:14 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:41:38 | login | rmatos.plansul@mpmg.mp.br | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T18:43:07 | logout | rmatos.plansul@mpmg.mp.br | Revisor | saida do painel | 127.0.0.1
+2026-04-08T18:43:36 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:43:59 | submit-edit | revistabarravento@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-08T18:45:06 | logout | revistabarravento@gmail.com | Conselho Editorial | saida do painel | 127.0.0.1
+2026-04-08T18:47:52 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:48:57 | member-create | revistabarravento@gmail.com | Conselho Editorial | novo membro jacomepcb@gmail.com.br (Conselho Editorial) | 127.0.0.1
+2026-04-08T18:53:17 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:57:53 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T18:58:42 | login | rmatos.plansul@mpmg.mp.br | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T19:01:43 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T19:23:21 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T19:24:21 | profile-update | revistabarravento@gmail.com | Conselho Editorial | atualizou perfil publico revistabarravento@gmail.com | 127.0.0.1
+2026-04-08T19:24:51 | submit-edit | revistabarravento@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-08T19:46:35 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T19:49:02 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T19:52:34 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:06:10 | login | revistabarravento@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:08:20 | login | revisor@gmail.com | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T20:08:51 | login | revisor@gmail.com | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T20:15:39 | login | redacao@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:16:30 | login | revisor@gmail.com | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T20:17:18 | login | revisor@gmail.com | Revisor | acesso ao painel | 127.0.0.1
+2026-04-08T20:17:18 | login | redação@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:19:20 | login | redacao@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:20:43 | login | redacao@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:24:23 | login | redacao@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-08T20:24:58 | profile-update | redacao@gmail.com | Conselho Editorial | atualizou perfil publico redacao@gmail.com | 127.0.0.1
+2026-04-08T20:25:41 | submit-edit | redacao@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-08T20:25:46 | approval | redacao@gmail.com | Conselho Editorial | aprovou edit: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-08T20:37:15 | profile-update | redacao@gmail.com | Conselho Editorial | atualizou perfil publico redacao@gmail.com | 127.0.0.1
+2026-04-08T20:37:21 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
+2026-04-08T20:39:44 | submit-edit | redacao@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-08T20:39:53 | approval | redacao@gmail.com | Conselho Editorial | aprovou edit: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-08T20:40:00 | rejection | redacao@gmail.com | Conselho Editorial | recusou edit: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-08T20:40:04 | rejection | redacao@gmail.com | Conselho Editorial | recusou edit: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-09T11:58:29 | login | redacao@gmail.com | Conselho Editorial | acesso ao painel | 127.0.0.1
+2026-04-09T11:58:46 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
+2026-04-09T12:01:30 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
+2026-04-09T12:02:02 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
+2026-04-09T12:02:18 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
