@@ -36,6 +36,21 @@
       "editorial_role": "Opcao A",
       "education": "",
       "photo_url": "",
+      "profile_published": true
+    },
+    "igordias@email.com": {
+      "name": "Igor Dias",
+      "email": "igordias@email.com",
+      "password_salt": "7b164b233d097572723d5c665f17f20d",
+      "password_hash": "5b4ee72f4f2d1e8f0a78c87a3cc8cf9db9847f44d35a817cd962ff2eacc15ef6",
+      "created_at": "2026-04-09T12:11:33",
+      "role": "admin",
+      "approved": true,
+      "approved_at": "2026-04-09T12:11:38",
+      "profile_slug": "igor-dias-igordias",
+      "editorial_role": "Opcao A",
+      "education": "",
+      "photo_url": "",
       "profile_published": true,
       "linked_articles": [
         {

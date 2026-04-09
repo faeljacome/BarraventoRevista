@@ -111,3 +111,12 @@
 2026-04-09T12:01:30 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
 2026-04-09T12:02:02 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
 2026-04-09T12:02:18 | who-update | redacao@gmail.com | Conselho Editorial | atualizou a pagina Quem Somos | 127.0.0.1
+2026-04-09T12:04:07 | submit-edit | redacao@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-09T12:04:13 | approval | redacao@gmail.com | Conselho Editorial | aprovou edit: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-09T12:05:07 | submit-edit | redacao@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-09T12:05:23 | approval | redacao@gmail.com | Conselho Editorial | aprovou edit: Nota sobre as manifestações setembrinas | 127.0.0.1
+2026-04-09T12:06:16 | submit-edit | redacao@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-09T12:11:33 | member-create | redacao@gmail.com | Conselho Editorial | novo membro igordias@email.com (Conselho Editorial) | 127.0.0.1
+2026-04-09T12:11:38 | member-approve | redacao@gmail.com | Conselho Editorial | aprovou cadastro de igordias@email.com | 127.0.0.1
+2026-04-09T12:12:09 | submit-edit | redacao@gmail.com | Conselho Editorial | enviou edicao: nota-sobre-as-manifestaa-a-es-setembrinas | 127.0.0.1
+2026-04-09T12:12:25 | approval | redacao@gmail.com | Conselho Editorial | aprovou edit: Nota sobre as manifestações setembrinas | 127.0.0.1

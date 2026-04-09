@@ -1,6 +1,42 @@
 {
   "items": [
     {
+      "id": "4b61c9f8e09b5b8c",
+      "message": "Sua edicao de \"Nota sobre as manifestações setembrinas\" foi aprovada pelo Conselho Editorial.",
+      "author_name": "Conselho Editorial",
+      "author_email": "",
+      "created_at": "2026-04-09T12:12:25",
+      "scope": "private",
+      "recipient_email": "redacao@gmail.com",
+      "variant": "success",
+      "title": "Nota sobre as manifestações setembrinas",
+      "related_submission_id": "edd31b1437cd9b7c"
+    },
+    {
+      "id": "7869cfc262e8cb11",
+      "message": "Sua edicao de \"Nota sobre as manifestações setembrinas\" foi aprovada pelo Conselho Editorial.",
+      "author_name": "Conselho Editorial",
+      "author_email": "",
+      "created_at": "2026-04-09T12:05:23",
+      "scope": "private",
+      "recipient_email": "redacao@gmail.com",
+      "variant": "success",
+      "title": "Nota sobre as manifestações setembrinas",
+      "related_submission_id": "4a46c9cf3b279208"
+    },
+    {
+      "id": "652b5b22e41a899a",
+      "message": "Sua edicao de \"Nota sobre as manifestações setembrinas\" foi aprovada pelo Conselho Editorial.",
+      "author_name": "Conselho Editorial",
+      "author_email": "",
+      "created_at": "2026-04-09T12:04:13",
+      "scope": "private",
+      "recipient_email": "redacao@gmail.com",
+      "variant": "success",
+      "title": "Nota sobre as manifestações setembrinas",
+      "related_submission_id": "1a4371e3c3d04510"
+    },
+    {
       "id": "2d8d48c40489ab1d",
       "message": "Sua edicao de \"Nota sobre as manifestações setembrinas\" foi recusada pelo Conselho Editorial.\n\nMotivo: aaaaaaaaaaaaaaaaaaaaaa22222222222222222",
       "author_name": "Conselho Editorial",

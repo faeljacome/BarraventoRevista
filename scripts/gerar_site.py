@@ -2340,7 +2340,6 @@ def render_profile_page(member: MemberProfile, articles: list[Article]) -> str:
         <div class="container">
           <div class="card-header">
             <h3>Textos assinados</h3>
-            <p>Lista de textos em que este integrante aparece como autor.</p>
           </div>
           <div class="story-grid">
 {authored_cards}
@@ -2554,19 +2553,19 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
       <section class="section member-panel" id="member-panel" hidden>
         <div class="container">
           <nav class="member-tabs" aria-label="Abas do painel de membros">
-            <button class="member-tab-button is-active" data-member-tab="upload" type="button">Upar textos</button>
-            <button class="member-tab-button" data-member-tab="profile" type="button">Editar perfil</button>
-            <button class="member-tab-button" data-member-tab="notices" type="button">Recados</button>
-            <button class="member-tab-button" data-member-tab="dashboard" type="button">Dashboard</button>
+            <button class="member-tab-button is-active" data-member-tab="notices" type="button">Recados</button>
+            <button class="member-tab-button" data-member-tab="upload" type="button">Publicar</button>
             <button class="member-tab-button" data-member-tab="edit" type="button">Editar texto</button>
+            <button class="member-tab-button" data-member-tab="profile" type="button">Editar perfil</button>
             <button class="member-tab-button" data-member-tab="members" type="button">Cadastrar membro</button>
             <button class="member-tab-button" id="approvals-tab-button" data-member-tab="approvals" type="button">Aprovações</button>
+            <button class="member-tab-button" data-member-tab="dashboard" type="button">Dashboard</button>
             <button class="member-tab-button" id="logs-tab-button" data-member-tab="logs" type="button">Logs</button>
           </nav>
 
-          <section class="upload-card upload-card--main member-tab-card is-active" data-member-tab-panel="upload" aria-hidden="false" style="display:block;">
+          <section class="upload-card upload-card--main member-tab-card" data-member-tab-panel="upload" aria-hidden="true" style="display:none;">
             <div class="card-header">
-              <h3>Upar textos</h3>
+              <h3>Publicar</h3>
               <p>Use este bloco para criar uma nova pagina no site. O sistema preserva negrito, italico e desloca notas de rodape e referencias bibliograficas para o final.</p>
             </div>
             <form id="create-form" class="upload-form upload-form--editor-layout">
@@ -2659,7 +2658,7 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             </form>
           </section>
 
-          <section class="upload-card upload-card--main member-tab-card" data-member-tab-panel="notices" aria-hidden="true" style="display:none;">
+          <section class="upload-card upload-card--main member-tab-card is-active" data-member-tab-panel="notices" aria-hidden="false" style="display:block;">
             <div class="card-header">
               <h3>Recados para membros</h3>
               <p>Esse mural fica visivel para todos os membros logados. Escreva e publique um recado abaixo.</p>
@@ -4678,9 +4677,9 @@ def render_upload_page(articles: list[Article], *, root_prefix: str = "") -> str
             if (!member) {{
               return;
             }}
-            setActiveTab("profile");
-            loadProfileData().catch((error) => {{
-              setStatus(profileStatus, "error", escapeHtml(error.message));
+            setActiveTab("notices");
+            loadNotices().catch((error) => {{
+              setStatus(noticeStatus, "error", escapeHtml(error.message));
             }});
           }}
 
